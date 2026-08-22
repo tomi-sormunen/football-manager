@@ -1,0 +1,79 @@
+name: Update data & deploy to Pages
+
+# What this does:
+#  * On a schedule (and on demand) it fetches fresh data from the FPL API and
+#    commits the updated data/*.json back to the repo.
+#  * It then deploys the static site to GitHub Pages.
+#  * On a normal push to the default branch it just re-deploys the site.
+#
+# One-time setup: repo Settings → Pages → "Build and deployment" → Source:
+# "GitHub Actions". No secrets required (uses the built-in GITHUB_TOKEN).
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Refresh a few times a day (UTC). Prices change ~once daily; form/injuries
+    # update around fixtures — this keeps data reasonably fresh without spam.
+    - cron: '17 6,11,16,21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write      # to commit refreshed data
+  pages: write         # to deploy Pages
+  id-token: write      # required by deploy-pages
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Refresh FPL data
+        # Skip on plain pushes (data already committed); refresh on schedule /
+        # manual runs. Falls back to sample data if the API call fails so a
+        # deploy is never blocked by an upstream hiccup.
+        if: github.event_name != 'push'
+        run: |
+          set -e
+          if python scripts/fetch_fpl_data.py --out data; then
+            echo "Fetched live FPL data."
+          else
+            echo "::warning::FPL API fetch failed — keeping existing data."
+          fi
+
+      - name: Commit updated data
+        if: github.event_name != 'push'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- data; then
+            git add data
+            git commit -m "chore(data): refresh FPL data [skip ci]"
+            git push
+          else
+            echo "No data changes to commit."
+          fi
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
