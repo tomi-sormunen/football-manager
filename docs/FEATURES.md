@@ -97,11 +97,18 @@ is intended to be **swapped/improved** over time (see roadmap Phase 3).
   - **Differentials** — high projection, sub-10% ownership.
 - Sample dataset committed so the site works before the first Action run.
 
-### Phase 2 — Personalisation
-- Import your squad by **FPL team ID** (fetched by the Action to avoid CORS, or
-  a manual paste), then tailor transfer/captain advice to your 15 and budget.
-- Free-transfer & bank tracking; hit (-4) break-even calculator.
-- Mini-league table view.
+### Phase 2 — Personalisation  🚧 in progress
+- ✅ **Import your squad by FPL team ID** (`fetch_entry.py`, run by the Action to
+  avoid CORS) → the **My Team** view: your XI/bench on a pitch, captain/vice,
+  bank & squad value, projected GW total, squad injury alerts, and per-position
+  **suggested transfers** ranked by 5-GW projected gain within your budget and
+  the 3-per-club limit, with the −4 hit break-even.
+- ✅ **Optional live team-id box** via a configurable transparent proxy
+  (`config.json` → `entry_proxy`; e.g. a Cloudflare Worker or Supabase Edge
+  Function) — the multi-user path.
+- ⬜ Free-transfer count tracking (the public API doesn't expose it reliably;
+  a manual input is the interim).
+- ⬜ Mini-league table view.
 
 ### Phase 3 — Smarter projections  🚧 in progress
 - ✅ **Opponent-adjusted expected-points model** (`xpts-v1`) with a minutes

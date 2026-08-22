@@ -55,6 +55,14 @@ jobs:
             echo "::warning::FPL API fetch failed — keeping existing data."
           fi
 
+      - name: Fetch manager squad (My Team)
+        # Uses the FPL_TEAM_ID repository variable if set, else config.json.
+        # Non-fatal so a missing/invalid id never blocks the deploy.
+        if: github.event_name != 'push'
+        env:
+          FPL_TEAM_ID: ${{ vars.FPL_TEAM_ID }}
+        run: python scripts/fetch_entry.py --out data || echo "::warning::entry fetch skipped"
+
       - name: Backtest the model (report only)
         if: github.event_name != 'push'
         run: python scripts/backtest.py --history data/history --teams data/teams.json --out data/backtest.json || echo "::warning::backtest skipped (needs a few GWs of history)"

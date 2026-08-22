@@ -275,6 +275,33 @@ def players_from_history(history):
     return players
 
 
+def build_sample_entry():
+    """A plausible 15-man squad (2-5-5-3) picked from the sample roster."""
+    # (element_id, slot). Slots 1-11 start (1=GK), 12-15 bench (12=backup GK).
+    starters = [
+        (29, 1),                                   # Raya (GK)
+        (18, 2), (20, 3), (22, 4), (23, 5),        # Gabriel, VvD, Muñoz, Milenković
+        (7, 6), (8, 7), (9, 8), (11, 9),           # Salah, Palmer, Saka, Semenyo
+        (1, 10), (3, 11),                          # Haaland, Watkins
+    ]
+    bench = [(32, 12), (15, 13), (27, 14), (4, 15)]  # Petrović, Caicedo, Aina, Wood
+    picks = []
+    for eid, slot in starters + bench:
+        picks.append({
+            "element": eid, "slot": slot,
+            "is_captain": eid == 7,                # Salah (C)
+            "is_vice": eid == 1,                   # Haaland (VC)
+            "multiplier": (2 if eid == 7 else (0 if slot >= 12 else 1)),
+        })
+    return {
+        "id": 9155976, "manager": "Sample Manager", "team_name": "Sample FC",
+        "event": CURRENT_GW, "overall_points": 512, "overall_rank": 850000,
+        "gw_points": 61, "bank": 1.5, "squad_value": 100.8,
+        "event_transfers": 1, "event_transfers_cost": 0,
+        "picks": picks, "source": "sample",
+    }
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="data")
@@ -311,6 +338,12 @@ def main(argv=None):
     # model projections from the simulated history
     projections = project_all(players, teams, fixtures, meta, history)
     write_projections(args.out, projections)
+
+    # sample squad so the "My Team" view renders without the FPL API
+    with open(os.path.join(args.out, "entry.json"), "w", encoding="utf-8") as fh:
+        json.dump(build_sample_entry(), fh, ensure_ascii=False, separators=(",", ":"))
+        fh.write("\n")
+    print("Wrote sample data/entry.json (My Team)")
     return 0
 
 
