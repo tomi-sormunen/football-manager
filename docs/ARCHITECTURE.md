@@ -57,9 +57,12 @@ football-manager/
 │   ├── fixtures.json       # fixtures with per-side FDR
 │   ├── projections.json    # expected-points model output (per player)
 │   ├── backtest.json       # model accuracy vs baselines
+│   ├── entry.json          # the manager's squad (My Team)
 │   └── history/gwNN.json   # per-gameweek snapshots (training/backtest set)
+├── config.json             # fpl_team_id + optional entry_proxy
 ├── scripts/
 │   ├── fetch_fpl_data.py   # FPL API → data/*.json + projections (in the Action)
+│   ├── fetch_entry.py      # a manager's squad → data/entry.json (in the Action)
 │   ├── build_history.py    # snapshot finished GWs → data/history/
 │   ├── model.py            # project_points(): the expected-points model
 │   ├── projections.py      # history + model → projections.json
@@ -137,6 +140,30 @@ All in [`assets/js/analysis.js`](../assets/js/analysis.js), documented inline:
 - **Transfer targets** — best projected/value option per position, availability
   filtered, with warnings for flagged players and price falls.
 - **Differentials** — high projection at sub-10% ownership.
+
+## Personalised squad (My Team)
+
+The FPL API blocks browser calls (no CORS), so the manager's own team is loaded
+the same way as everything else: the Action runs `fetch_entry.py` server-side and
+commits `data/entry.json`, which the site reads same-origin. The team id comes
+from the `FPL_TEAM_ID` repository variable, else `config.json`.
+
+`data/entry.json` (one manager's squad):
+```json
+{ "id": 9155976, "manager": "…", "team_name": "…", "event": 8,
+  "overall_points": 512, "bank": 1.5, "squad_value": 100.8,
+  "picks": [{ "element": 351, "slot": 1, "is_captain": false,
+              "is_vice": false, "multiplier": 1 }] }
+```
+`slot` 1–11 are the starting XI (1 = GK), 12–15 the bench in priority order.
+
+**Optional live input.** `config.json` may set `entry_proxy` to a *transparent
+proxy* that forwards to the FPL API (a Cloudflare Worker, or a Supabase Edge
+Function). When set, the My Team view's team-id box fetches any manager live in
+the browser through that proxy — the clean multi-user path. Without a proxy the
+box explains that a different team must be baked in via the Action. The proxy
+only needs to forward `/entry/{id}/…` and add permissive CORS headers; the client
+reshapes the response with the same logic as `fetch_entry.py`.
 
 ## Refresh cadence
 

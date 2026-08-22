@@ -206,6 +206,94 @@ export function watchList(bundle, { limit = 8 } = {}) {
   return scored;
 }
 
+// ---- Personalised squad (from data/entry.json) -----------------------------
+
+// Decompose the manager's entry into resolved players.
+export function squad(bundle) {
+  const e = bundle.entry;
+  if (!e || !e.picks) return null;
+  const byId = bundle.playerById;
+  const resolved = e.picks
+    .map((pk) => ({ pk, p: byId.get(pk.element) }))
+    .filter((x) => x.p);
+  resolved.sort((a, b) => a.pk.slot - b.pk.slot);
+  const xi = resolved.filter((x) => x.pk.slot <= 11).map((x) => x.p);
+  const bench = resolved.filter((x) => x.pk.slot >= 12).map((x) => x.p);
+  const captain = resolved.find((x) => x.pk.is_captain)?.p || null;
+  const vice = resolved.find((x) => x.pk.is_vice)?.p || null;
+  return { entry: e, all: resolved.map((x) => x.p), xi, bench, captain, vice };
+}
+
+// Projected points for the XI next GW, counting the captain twice.
+export function squadProjection(bundle, sq) {
+  let total = 0;
+  for (const p of sq.xi) total += projectPlayer(bundle, p, 1).perGame;
+  const capExtra = sq.captain ? projectPlayer(bundle, sq.captain, 1).perGame : 0;
+  return { total: +(total + capExtra).toFixed(1), captain: +capExtra.toFixed(1) };
+}
+
+// Best captain in the XI for next GW vs the current armband.
+export function captainAdvice(bundle, sq) {
+  const ranked = sq.xi
+    .map((p) => ({ p, proj: projectPlayer(bundle, p, 1).perGame }))
+    .sort((a, b) => b.proj - a.proj);
+  return { best: ranked[0] || null, current: sq.captain, ranked };
+}
+
+// Suggested single transfers: for each squad player, the best affordable,
+// available upgrade in the same position, ranked by 5-GW projected gain.
+// Sell price is approximated by current price (public API hides exact sell
+// value); the −4 hit break-even is shown so the call is explicit.
+export function transferSuggestions(bundle, sq, { limit = 5 } = {}) {
+  const bank = sq.entry.bank ?? 0;
+  const ownedIds = new Set(sq.all.map((p) => p.id));
+  // count owned players per club (for the 3-per-club rule)
+  const perClub = {};
+  for (const p of sq.all) perClub[p.team] = (perClub[p.team] || 0) + 1;
+
+  const proj5 = (p) => projectPlayer(bundle, p, 5).total;
+
+  const suggestions = [];
+  for (const out of sq.all) {
+    const budget = out.price + bank;
+    const outProj = proj5(out);
+    const candidates = bundle.players.filter((c) =>
+      c.pos === out.pos && !ownedIds.has(c.id) && !c.flagged &&
+      c.minutes > 0 && c.price <= budget &&
+      // 3-per-club: ok if different club, or that club has room after selling `out`
+      ((c.team === out.team) || ((perClub[c.team] || 0) < 3)));
+    if (!candidates.length) continue;
+    let best = null, bestP = -Infinity;
+    for (const c of candidates) {
+      const cp = proj5(c);
+      if (cp > bestP) { bestP = cp; best = c; }
+    }
+    const gain = +(bestP - outProj).toFixed(1);
+    if (best && gain > 0) {
+      suggestions.push({ out, in: best, gain, outProj: +outProj.toFixed(1),
+        inProj: +bestP.toFixed(1), netAfterHit: +(gain - 4).toFixed(1) });
+    }
+  }
+  // Highest-gain first, then keep at most one suggestion per incoming player and
+  // per outgoing player, so the list reads as distinct realistic moves rather
+  // than the same star target proposed for several slots.
+  suggestions.sort((a, b) => b.gain - a.gain);
+  const usedIn = new Set(), usedOut = new Set();
+  const deduped = [];
+  for (const s of suggestions) {
+    if (usedIn.has(s.in.id) || usedOut.has(s.out.id)) continue;
+    usedIn.add(s.in.id);
+    usedOut.add(s.out.id);
+    deduped.push(s);
+  }
+  return deduped.slice(0, limit);
+}
+
+// Flagged (injured/doubtful) players in the squad.
+export function squadFlags(sq) {
+  return sq.all.filter((p) => p.flagged);
+}
+
 // Price movers this gameweek.
 export function priceMovers(bundle, limit = 6) {
   const risers = bundle.players.filter((p) => p.cost_change_event > 0)

@@ -11,6 +11,7 @@ running as a static web app you can host **for free on GitHub Pages**.
 | View | What you get |
 |---|---|
 | **Dashboard** | Current gameweek, deadline countdown, top captain & value picks, price movers, a sell/watch list. |
+| **My Team** | Import your squad by FPL team ID: your XI/bench on a pitch with captain/vice, bank & value, projected GW total, injury alerts, and suggested transfers (5-GW gain, budget- and club-limit-aware, with −4 hit break-even). |
 | **Players** | Sortable, filterable explorer — price, form, points-per-£m, xGI, **DEFCON per 90** (the new 2025/26 defensive scoring), ownership, and a projection over the next 5 GWs. |
 | **Fixtures** | Colour-coded Fixture Difficulty Ratings (FDR) ticker for the next 6 gameweeks, sorted by easiest run. |
 | **Captains** | Ranked captaincy picks with a transparent breakdown (appearance / attack / clean sheet / DEFCON). |
@@ -55,6 +56,16 @@ Action replaces it with live data.
 
 No secrets or tokens required — it uses the built-in `GITHUB_TOKEN`.
 
+### Load your own team (My Team)
+Set your **FPL team ID** (the number in your Points-page URL,
+`.../entry/<ID>/event/...`) in [`config.json`](config.json), or as an
+`FPL_TEAM_ID` repository variable. The Action fetches your squad server-side and
+commits `data/entry.json` (the FPL API can't be called from the browser — CORS).
+For a live team-id box that loads *any* manager on the fly, point
+`config.json`'s `entry_proxy` at a transparent proxy that forwards to the FPL API
+(a Cloudflare Worker or a Supabase Edge Function) — see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#personalised-squad-my-team).
+
 ## Repository layout
 ```
 index.html            SPA entry point
@@ -62,8 +73,10 @@ assets/css, assets/js  styles + app (data loader, analysis engine, views, router
 data/                 committed JSON, refreshed by the Action
   history/            per-gameweek snapshots (training / backtest set)
   projections.json    model output · backtest.json (accuracy report)
-scripts/              fetch_fpl_data.py · build_history.py · backfill_history.py
-                      model.py · projections.py · backtest.py · make_sample_data.py
+config.json           your FPL team ID + optional live-input proxy URL
+scripts/              fetch_fpl_data.py · fetch_entry.py · build_history.py
+                      backfill_history.py · model.py · projections.py
+                      backtest.py · make_sample_data.py
 docs/                 RULES · FEATURES · ARCHITECTURE · MODEL · INFRASTRUCTURE
 .github/workflows/    pages.yml (history → data → projections → backtest → deploy)
                       backfill.yml (manual: backfill past seasons → backtest)
@@ -78,7 +91,7 @@ docs/                 RULES · FEATURES · ARCHITECTURE · MODEL · INFRASTRUCTU
 
 ## Roadmap (short version)
 - **Done:** the views above; the opponent-adjusted expected-points model (`xpts-v1`) with per-GW history snapshots, a backtest harness, and a **backfill from a public multi-season dataset** — `xpts-v1` beats naive baselines on real 2022-24 data ([`docs/MODEL.md`](docs/MODEL.md)).
-- **Next:** import your own squad by FPL team ID for personalised advice; free-transfer/hit break-even calculator; mini-league view.
+- **Next:** the **My Team** view — import your squad by FPL team ID for personalised captain & transfer advice (done); free-transfer count tracking and a mini-league view still to come.
 - **Later:** a gradient-boosted model, a multi-week transfer & chip planner, and a squad optimiser.
 
 ### Get real backtest numbers now

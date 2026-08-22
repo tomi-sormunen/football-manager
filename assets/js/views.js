@@ -1,7 +1,7 @@
 // Rendering for each view. Pure-ish: given the data bundle, return a DOM node.
 // No framework — small template helpers + a sortable table builder.
 
-import { POS_ORDER, POS_LABEL, STATUS } from './data.js';
+import { POS_ORDER, POS_LABEL, STATUS, fetchEntryViaProxy, applyEntry } from './data.js';
 import * as A from './analysis.js';
 
 // ---- tiny helpers -----------------------------------------------------------
@@ -45,6 +45,7 @@ function fixtureStrip(bundle, teamId, n = 5) {
 function playerCell(p) {
   return h('span', { class: 'pcell' }, [
     statusDot(p),
+    p.owned ? h('span', { class: 'owned', title: 'In your squad' }, '★') : null,
     h('span', { class: 'pname' }, p.web),
     h('span', { class: 'pteam' }, `${p.team_short} ${p.pos}`),
   ]);
@@ -456,4 +457,164 @@ export function differentials(bundle) {
   return wrap;
 }
 
-export const VIEWS = { dashboard, players, fixtures, captains, transfers, differentials };
+// ---- My Team (personalised) -------------------------------------------------
+
+export function myTeam(bundle) {
+  const wrap = h('div', { class: 'view' });
+
+  const render = () => {
+    const sq = A.squad(bundle);
+    const parts = [teamIdCard(bundle, render)];
+    if (!sq) {
+      parts.push(card('My Team', h('div', {}, [
+        note('No squad loaded yet. Set your FPL team ID in config.json (or the ' +
+          'FPL_TEAM_ID repository variable) and run the “Update FPL data” Action — ' +
+          'it fetches your team server-side and commits data/entry.json. The FPL ' +
+          'API can’t be called directly from the browser (CORS), so a live team-ID ' +
+          'box here needs a proxy (see docs/ARCHITECTURE.md).')])));
+      wrap.replaceChildren(...parts);
+      return;
+    }
+
+    const e = sq.entry;
+    const sp = A.squadProjection(bundle, sq);
+    const stat = (label, val) => h('div', { class: 'stat' }, [
+      h('span', { class: 'stat-label' }, label), h('div', { class: 'stat-val' }, val)]);
+    parts.push(h('div', { class: 'stats' }, [
+      stat('Manager', h('strong', {}, e.manager || '—')),
+      stat('Overall', h('strong', {}, e.overall_points != null
+        ? `${e.overall_points.toLocaleString()} pts` : '—')),
+      stat('In the bank', h('strong', {}, `£${(e.bank ?? 0).toFixed(1)}m`)),
+      stat(`GW${bundle.meta.next_gw} projected`, h('strong', {}, sp.total.toFixed(1))),
+    ]));
+    if (e.source === 'sample') {
+      parts.push(h('div', { class: 'banner' },
+        'Sample squad — set your team ID and run the Action to load your real team.'));
+    }
+
+    parts.push(card(`Your team — GW${e.event}`, pitch(bundle, sq),
+      h('span', { class: 'muted small' }, `Captain contributes +${sp.captain.toFixed(1)}`)));
+
+    // Captain advice
+    const ca = A.captainAdvice(bundle, sq);
+    if (ca.best) {
+      const same = sq.captain && ca.best.p.id === sq.captain.id;
+      const curProj = sq.captain
+        ? A.projectPlayer(bundle, sq.captain, 1).perGame.toFixed(1) : '—';
+      parts.push(card('Captaincy', h('div', { class: 'advice' }, [
+        same
+          ? h('p', {}, [okTick(), ' Your captain ', b(sq.captain.web),
+            ` is also the model’s top pick for GW${bundle.meta.next_gw} `,
+            `(${ca.best.proj.toFixed(1)} pts).`])
+          : h('p', {}, [warnTick(), ' Consider captaining ', b(ca.best.p.web),
+            ` (${ca.best.proj.toFixed(1)}) over `, b(sq.captain ? sq.captain.web : '—'),
+            ` (${curProj}) for GW${bundle.meta.next_gw}.`]),
+      ])));
+    }
+
+    // Flags
+    const flags = A.squadFlags(sq);
+    if (flags.length) {
+      parts.push(card('⚠︎ Squad alerts', h('ul', { class: 'watch' },
+        flags.map((p) => h('li', {}, [statusDot(p), h('span', { class: 'pname' }, p.web),
+          h('span', { class: 'muted small' },
+            `${STATUS[p.status]?.label}${p.news ? ' — ' + p.news : ''}`)])))));
+    }
+
+    // Transfer suggestions
+    const sugg = A.transferSuggestions(bundle, sq, { limit: 5 });
+    const sBody = sugg.length ? table([
+      { key: 'out', label: 'Out', get: (r) => r.out.web, sortable: false,
+        fmt: (_v, r) => playerCell(r.out) },
+      { key: 'in', label: 'In', get: (r) => r.in.web, sortable: false,
+        fmt: (_v, r) => playerCell(r.in) },
+      { key: 'op', label: 'Out proj5', align: 'right', get: (r) => r.outProj, sortable: false,
+        fmt: (v) => v.toFixed(1) },
+      { key: 'ip', label: 'In proj5', align: 'right', get: (r) => r.inProj, sortable: false,
+        fmt: (v) => v.toFixed(1) },
+      { key: 'gain', label: 'Gain', align: 'right', get: (r) => r.gain, sortable: false,
+        fmt: (v) => h('strong', {}, `+${v.toFixed(1)}`) },
+      { key: 'hit', label: 'After −4 hit', align: 'right', get: (r) => r.netAfterHit,
+        sortable: false, fmt: (v) => h('span', { class: v > 0 ? 'pos-ok' : 'muted' },
+          `${v > 0 ? '+' : ''}${v.toFixed(1)}`) },
+    ], sugg) : note('No affordable upgrade improves your squad’s 5-GW projection right now.');
+    parts.push(card('Suggested transfers', h('div', {}, [sBody, note(
+      'Ranked by projected points gained over the next 5 GWs, within your bank ' +
+      '(£' + (e.bank ?? 0).toFixed(1) + 'm) and the 3-per-club limit. “After −4 hit” ' +
+      'is the net if this isn’t a free transfer — only worthwhile when positive. ' +
+      'Sell prices are approximated by current price (the public API hides exact ' +
+      'sell value).')])));
+
+    wrap.replaceChildren(...parts);
+  };
+
+  render();
+  return wrap;
+}
+
+function b(text) { return h('strong', {}, text); }
+function okTick() { return h('span', { class: 'pos-ok' }, '✓'); }
+function warnTick() { return h('span', { class: 'arrow down' }, '➜'); }
+
+function pitch(bundle, sq) {
+  const chip = (p) => {
+    const proj = A.projectPlayer(bundle, p, 1).perGame;
+    const isC = sq.captain && sq.captain.id === p.id;
+    const isV = sq.vice && sq.vice.id === p.id;
+    return h('div', { class: 'chip' + (p.flagged ? ' chip-flag' : '') }, [
+      h('div', { class: 'chip-badges' }, [
+        isC ? h('span', { class: 'cap' }, 'C') : (isV ? h('span', { class: 'vice' }, 'V') : null),
+        p.flagged ? h('span', { class: 'dot dot-flag' }) : null]),
+      h('div', { class: 'chip-name' }, p.web),
+      h('div', { class: 'chip-sub' }, `${p.team_short} · ${proj.toFixed(1)}`),
+    ]);
+  };
+  const rows = POS_ORDER.map((pos) => {
+    const line = sq.xi.filter((p) => p.pos === pos);
+    return line.length ? h('div', { class: 'pitch-row' }, line.map(chip)) : null;
+  }).filter(Boolean);
+  return h('div', {}, [
+    h('div', { class: 'pitch' }, rows),
+    h('div', { class: 'bench' }, [h('span', { class: 'bench-lbl' }, 'Bench'),
+      ...sq.bench.map(chip)]),
+  ]);
+}
+
+function teamIdCard(bundle, rerender) {
+  const current = bundle.entry?.id || bundle.config?.fpl_team_id || '';
+  const proxy = bundle.config?.entry_proxy;
+  const input = h('input', { type: 'text', inputmode: 'numeric', value: String(current),
+    placeholder: 'FPL team ID', class: 'teamid' });
+  const status = h('span', { class: 'muted small' });
+
+  const load = async () => {
+    const id = input.value.trim();
+    if (!/^\d+$/.test(id)) { status.textContent = 'Enter a numeric team ID.'; return; }
+    try { localStorage.setItem('fpl_team_id', id); } catch { /* ignore */ }
+    if (proxy) {
+      status.textContent = 'Loading…';
+      try {
+        const entry = await fetchEntryViaProxy(proxy, id, bundle.meta.current_gw || 1);
+        applyEntry(bundle, entry);
+        status.textContent = `Loaded ${entry.manager || id}.`;
+        rerender();
+      } catch (err) { status.textContent = `Could not load team ${id}: ${err.message}`; }
+    } else if (String(id) === String(bundle.entry?.id)) {
+      status.textContent = 'This is the team loaded by the Action.';
+    } else {
+      status.textContent = 'Saved. To load a different team without a proxy, set ' +
+        'FPL_TEAM_ID / config.json and re-run the Action (the browser can’t call the ' +
+        'FPL API directly).';
+    }
+  };
+  const btn = h('button', { class: 'btn', onclick: load }, 'Load');
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(); });
+
+  return card('Team ID', h('div', { class: 'controls' }, [
+    input, btn, status,
+    h('a', { class: 'muted small', href: 'https://fantasy.premierleague.com/',
+      target: '_blank', rel: 'noopener' }, 'Where do I find this?')]));
+}
+
+export const VIEWS = { dashboard, myteam: myTeam, players, fixtures, captains,
+  transfers, differentials };

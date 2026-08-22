@@ -5,6 +5,7 @@ import { VIEWS } from './views.js';
 
 const ROUTES = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'myteam', label: 'My Team' },
   { id: 'players', label: 'Players' },
   { id: 'fixtures', label: 'Fixtures' },
   { id: 'captains', label: 'Captains' },

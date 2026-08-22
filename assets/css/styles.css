@@ -225,4 +225,44 @@ td.al-center, th.al-center { text-align: center; }
 .bar-defcon { background: var(--accent-2); }
 .bar-val { width: 30px; text-align: right; color: var(--text-dim); }
 
+/* Owned marker */
+.owned { color: #e8b923; font-size: 12px; }
+.pos-ok { color: var(--ok); font-weight: 700; }
+
+/* My Team pitch */
+.pitch {
+  background:
+    linear-gradient(color-mix(in srgb, var(--ok) 16%, var(--surface)),
+                    color-mix(in srgb, var(--ok) 9%, var(--surface)));
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 8px; display: flex; flex-direction: column; gap: 14px;
+}
+.pitch-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.bench { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 4px 4px; }
+.bench-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
+.chip {
+  position: relative; min-width: 78px; max-width: 96px; text-align: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 6px 6px; box-shadow: var(--shadow);
+}
+.chip-flag { border-color: color-mix(in srgb, var(--flag) 55%, var(--border)); }
+.chip-badges { position: absolute; top: -8px; right: -6px; display: flex; gap: 3px; }
+.chip .cap, .chip .vice {
+  width: 18px; height: 18px; border-radius: 50%; font-size: 11px; font-weight: 800;
+  display: grid; place-items: center; color: #fff;
+}
+.chip .cap { background: var(--accent); }
+.chip .vice { background: var(--text-dim); }
+.chip-name { font-weight: 700; font-size: 13px; }
+.chip-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.bench .chip { min-width: 70px; }
+
+.advice p { margin: 6px 8px; }
+.teamid { min-width: 140px; }
+.btn {
+  padding: 8px 16px; border: 1px solid var(--accent); background: var(--accent);
+  color: #fff; border-radius: 9px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.btn:hover { filter: brightness(1.06); }
+
 .foot { max-width: 1120px; margin: 0 auto; padding: 10px 16px 40px; text-align: center; }
