@@ -43,6 +43,8 @@
 "corr": 0.199
 }
 },
+"seasons": {
+"history": {
 "gws_evaluated": [
 4,
 5,
@@ -50,4 +52,6 @@
 7,
 8
 ]
+}
+}
 }
