@@ -1,0 +1,50 @@
+name: Backfill history & backtest
+
+# Manually backfill one or more past seasons from the open community FPL dataset
+# (vaastav/Fantasy-Premier-League), run the backtest, and commit the small
+# accuracy report (data/backfill/backtest.json). The raw per-gameweek snapshots
+# are regenerable and git-ignored, so only the result is committed.
+#
+# Run it from the Actions tab → "Backfill history & backtest" → Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seasons:
+        description: 'Comma-separated seasons (e.g. 2021-22,2022-23,2023-24)'
+        required: true
+        default: '2022-23,2023-24'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Backfill seasons
+        run: python scripts/backfill_history.py --seasons "${{ inputs.seasons }}" --out data/backfill
+
+      - name: Backtest across backfilled seasons
+        run: python scripts/backtest.py --history data/backfill --out data/backfill/backtest.json
+
+      - name: Commit backtest result
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- data/backfill/backtest.json; then
+            git add data/backfill/backtest.json
+            git commit -m "chore(backtest): refresh backfilled backtest report [skip ci]"
+            git push
+          else
+            echo "No change in backtest report."
+          fi

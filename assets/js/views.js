@@ -160,6 +160,19 @@ export function dashboard(bundle) {
       'to populate live prices, form and fixtures.'));
   }
 
+  // Model validation, if a backtest report is present.
+  const bt = bundle.backtest;
+  if (bt && bt.model && bt.model.mae != null) {
+    const seasons = bt.seasons ? Object.keys(bt.seasons).join(', ') : '';
+    wrap.appendChild(h('div', { class: 'banner ok' }, [
+      h('strong', {}, `Model validated: `),
+      `MAE ${bt.model.mae} vs ${bt.baseline_last.mae} (last GW) / ` +
+      `${bt.baseline_ppg.mae} (season avg) baseline`,
+      seasons ? h('span', { class: 'muted small' }, ` — backtested on ${seasons}, `
+        + `${bt.model.n.toLocaleString()} player-GW samples` ) : null,
+    ]));
+  }
+
   // Top captains
   const caps = A.captainRanking(bundle, 5);
   const capBody = table([

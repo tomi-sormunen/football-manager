@@ -30,12 +30,13 @@ async function getJSONOptional(path) {
 }
 
 export async function loadData() {
-  const [meta, teams, players, fixtures, projections] = await Promise.all([
+  const [meta, teams, players, fixtures, projections, backtest] = await Promise.all([
     getJSON('data/meta.json'),
     getJSON('data/teams.json'),
     getJSON('data/players.json'),
     getJSON('data/fixtures.json'),
     getJSONOptional('data/projections.json'),
+    getJSONOptional('data/backfill/backtest.json'),   // model validation report
   ]);
 
   const teamById = new Map(teams.map((t) => [t.id, t]));
@@ -51,5 +52,5 @@ export async function loadData() {
     p.model = projById ? (projById[p.id] || projById[String(p.id)] || null) : null;
   }
 
-  return { meta, teams, teamById, players, fixtures, projections };
+  return { meta, teams, teamById, players, fixtures, projections, backtest };
 }

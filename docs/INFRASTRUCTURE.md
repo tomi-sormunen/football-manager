@@ -111,9 +111,12 @@ Everything above is free. You'd reach for paid infrastructure only for:
 
 ## Recommended path for this project
 
-1. **Now (free):** backfill `data/history/` from the community dataset, keep
-   accumulating live snapshots via Actions, store as Parquet/SQLite in-repo,
-   train + backtest in CI, commit `backtest.json`, serve on Pages. This is a
+1. **Now (free) — partly done:** [`scripts/backfill_history.py`](../scripts/backfill_history.py)
+   already converts past seasons from the community dataset into our schema, and
+   the backtest runs over them (see [`MODEL.md`](MODEL.md) for the real 2022-24
+   results). Keep accumulating live snapshots via Actions, and — as the next
+   step — store the growing history as Parquet/SQLite in-repo rather than one
+   JSON per GW. Train + backtest in CI, commit the report, serve on Pages. A
    genuinely backtested model at zero cost.
 2. **If/when personalised squad import is wanted:** add a free serverless proxy
    (Cloudflare Workers) for the per-user FPL calls; the model stays in CI.

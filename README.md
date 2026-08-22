@@ -62,10 +62,11 @@ assets/css, assets/js  styles + app (data loader, analysis engine, views, router
 data/                 committed JSON, refreshed by the Action
   history/            per-gameweek snapshots (training / backtest set)
   projections.json    model output · backtest.json (accuracy report)
-scripts/              fetch_fpl_data.py · build_history.py · model.py
-                      projections.py · backtest.py · make_sample_data.py
+scripts/              fetch_fpl_data.py · build_history.py · backfill_history.py
+                      model.py · projections.py · backtest.py · make_sample_data.py
 docs/                 RULES · FEATURES · ARCHITECTURE · MODEL · INFRASTRUCTURE
 .github/workflows/    pages.yml (history → data → projections → backtest → deploy)
+                      backfill.yml (manual: backfill past seasons → backtest)
 ```
 
 ## Docs
@@ -76,8 +77,16 @@ docs/                 RULES · FEATURES · ARCHITECTURE · MODEL · INFRASTRUCTU
 - [`docs/INFRASTRUCTURE.md`](docs/INFRASTRUCTURE.md) — what a backtested model needs, and the (free) options.
 
 ## Roadmap (short version)
-- **Done:** the views above; the opponent-adjusted expected-points model (`xpts-v1`) with a backtest harness and per-GW history snapshots.
-- **Next:** backfill history from a public dataset for real backtest numbers now; import your own squad by FPL team ID; free-transfer/hit break-even calculator.
+- **Done:** the views above; the opponent-adjusted expected-points model (`xpts-v1`) with per-GW history snapshots, a backtest harness, and a **backfill from a public multi-season dataset** — `xpts-v1` beats naive baselines on real 2022-24 data ([`docs/MODEL.md`](docs/MODEL.md)).
+- **Next:** import your own squad by FPL team ID for personalised advice; free-transfer/hit break-even calculator; mini-league view.
 - **Later:** a gradient-boosted model, a multi-week transfer & chip planner, and a squad optimiser.
+
+### Get real backtest numbers now
+```bash
+python scripts/backfill_history.py --seasons 2022-23,2023-24 --out data/backfill
+python scripts/backtest.py --history data/backfill --out data/backfill/backtest.json
+```
+Or run the **“Backfill history & backtest”** GitHub Action. The dashboard shows a
+“Model validated” banner from the result.
 
 See [`docs/FEATURES.md`](docs/FEATURES.md#roadmap) for the full plan.
