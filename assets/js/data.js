@@ -24,23 +24,32 @@ async function getJSON(path) {
   return res.json();
 }
 
+// Optional file: absent on very first deploy, so failure is non-fatal.
+async function getJSONOptional(path) {
+  try { return await getJSON(path); } catch { return null; }
+}
+
 export async function loadData() {
-  const [meta, teams, players, fixtures] = await Promise.all([
+  const [meta, teams, players, fixtures, projections] = await Promise.all([
     getJSON('data/meta.json'),
     getJSON('data/teams.json'),
     getJSON('data/players.json'),
     getJSON('data/fixtures.json'),
+    getJSONOptional('data/projections.json'),
   ]);
 
   const teamById = new Map(teams.map((t) => [t.id, t]));
 
   // Attach convenience fields used across views.
+  const projById = projections?.players || null;
   for (const p of players) {
     p.team_obj = teamById.get(p.team);
     p.value_pts = p.price ? +(p.pts / p.price).toFixed(2) : 0;      // pts / £m
     p.value_form = p.price ? +(p.form / p.price).toFixed(2) : 0;    // form / £m
     p.flagged = (STATUS[p.status] || STATUS.u).flag;
+    // Model projection for this player, if projections.json was present.
+    p.model = projById ? (projById[p.id] || projById[String(p.id)] || null) : null;
   }
 
-  return { meta, teams, teamById, players, fixtures };
+  return { meta, teams, teamById, players, fixtures, projections };
 }

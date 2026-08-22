@@ -54,10 +54,17 @@ football-manager/
 │   ├── meta.json           # season, current GW, deadline, source, timestamp
 │   ├── teams.json          # clubs + strength ratings
 │   ├── players.json        # slim per-player rows (see schema below)
-│   └── fixtures.json       # fixtures with per-side FDR
+│   ├── fixtures.json       # fixtures with per-side FDR
+│   ├── projections.json    # expected-points model output (per player)
+│   ├── backtest.json       # model accuracy vs baselines
+│   └── history/gwNN.json   # per-gameweek snapshots (training/backtest set)
 ├── scripts/
-│   ├── fetch_fpl_data.py   # FPL API → data/*.json  (runs in the Action)
-│   └── make_sample_data.py # generates a schema-matching sample dataset
+│   ├── fetch_fpl_data.py   # FPL API → data/*.json + projections (in the Action)
+│   ├── build_history.py    # snapshot finished GWs → data/history/
+│   ├── model.py            # project_points(): the expected-points model
+│   ├── projections.py      # history + model → projections.json
+│   ├── backtest.py         # replay past GWs, report accuracy
+│   └── make_sample_data.py # schema-matching sample dataset (+ synthetic history)
 ├── docs/                   # RULES.md, FEATURES.md, ARCHITECTURE.md
 └── .github/workflows/
     ├── update-data.yml     # schedule + manual: refresh data, commit

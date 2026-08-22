@@ -81,8 +81,34 @@ export function projectForFixture(p, fdr) {
   return { appearance, attack, defence, defcon, ease, csProb };
 }
 
-// Blended projection over the next `horizon` fixtures (1 = captaincy / next GW).
+// Whether model projections (data/projections.json) were loaded.
+export function hasModel(bundle) {
+  return !!(bundle.projections && bundle.projections.players);
+}
+
+// Projection over the next `horizon` fixtures (1 = captaincy / next GW).
+// Prefers the fitted model (projections.json); falls back to the client
+// heuristic below when projections aren't available.
 export function projectPlayer(bundle, p, horizon = 1) {
+  if (p.model && p.model.by_gw && p.model.by_gw.length) {
+    const fixtures = teamFixtures(bundle, p.team, bundle.meta.next_gw, horizon);
+    const slice = p.model.by_gw.slice(0, horizon);
+    const total = slice.reduce((s, g) => s + g.exp, 0);
+    const perGame = slice.length ? total / slice.length : 0;
+    // The model exposes a breakdown for the next fixture (next_parts).
+    const parts = p.model.next_parts
+      ? { appearance: p.model.next_parts.appearance, attack: p.model.next_parts.attack,
+          defence: p.model.next_parts.defence, defcon: p.model.next_parts.defcon }
+      : null;
+    return {
+      total: +total.toFixed(2), perGame: +perGame.toFixed(2),
+      fixtures, parts, detail: p.model.next_detail || null, source: 'model',
+    };
+  }
+  return heuristicProjection(bundle, p, horizon);
+}
+
+function heuristicProjection(bundle, p, horizon = 1) {
   const { meta } = bundle;
   const fixtures = teamFixtures(bundle, p.team, meta.next_gw, horizon);
   const mf = minutesFactor(p, meta.current_gw);

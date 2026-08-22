@@ -103,12 +103,20 @@ is intended to be **swapped/improved** over time (see roadmap Phase 3).
 - Free-transfer & bank tracking; hit (-4) break-even calculator.
 - Mini-league table view.
 
-### Phase 3 — Smarter projections
-- Replace the heuristic with a fitted expected-points model (per-90 rates,
-  opponent-adjusted, minutes model), backtested against past GWs stored in
-  `data/history/`.
-- Multi-week transfer **planner** (plan several GWs ahead, compare paths).
-- Chip-timing optimiser using double/blank gameweek detection.
+### Phase 3 — Smarter projections  🚧 in progress
+- ✅ **Opponent-adjusted expected-points model** (`xpts-v1`) with a minutes
+  model, regressed per-90 rates, a fitted clean-sheet logistic and a DEFCON
+  hit-rate — replacing the heuristic where available, with the heuristic kept as
+  a fallback. See [`MODEL.md`](MODEL.md).
+- ✅ **Per-gameweek history snapshots** (`data/history/`) via `build_history.py`,
+  accumulating the training/backtest set over the season.
+- ✅ **Backtest harness** (`backtest.py`) comparing the model against naive
+  baselines (MAE / RMSE / correlation), reported to `data/backtest.json`.
+- ⬜ **Backfill history** from a public multi-season dataset so real backtest
+  numbers exist immediately (see [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)).
+- ⬜ Upgrade `xpts-v1` toward a gradient-boosted model once history is deep.
+- ⬜ Multi-week transfer **planner** (plan several GWs ahead, compare paths).
+- ⬜ Chip-timing optimiser using double/blank gameweek detection.
 
 ### Phase 4 — Optimisation & polish
 - Squad optimiser (best XI / best 15 under £100m and the 3-per-club limit) via
