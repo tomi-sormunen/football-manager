@@ -107,6 +107,15 @@ function card(title, body, extra) {
 
 function note(text) { return h('p', { class: 'muted small' }, text); }
 
+// One-line description of which projection is powering the numbers.
+function projectionBlurb(bundle) {
+  const m = bundle.projections?.meta;
+  return m
+    ? `Projections use the ${m.model} expected-points model, fitted on ${m.history_gws} ` +
+      'gameweeks of history (opponent-adjusted; see docs/MODEL.md).'
+    : 'Projections use a transparent client-side heuristic (see docs/FEATURES.md).';
+}
+
 // ---- Dashboard --------------------------------------------------------------
 
 function deadlineCountdown(meta) {
@@ -133,12 +142,16 @@ export function dashboard(bundle) {
   const stat = (label, value) => h('div', { class: 'stat' }, [
     h('span', { class: 'stat-label' }, label), h('div', { class: 'stat-val' }, value)]);
 
+  const model = bundle.projections?.meta;
   wrap.appendChild(h('div', { class: 'stats' }, [
     stat('Gameweek', h('strong', {}, `GW${meta.current_gw}`)),
     stat(`GW${meta.next_gw} deadline`, deadlineCountdown(meta)),
-    stat('Season', h('strong', {}, meta.season || '—')),
     stat('Data', h('span', { class: `tag tag-${meta.source === 'fpl-api' ? 'live' : 'sample'}` },
       meta.source === 'fpl-api' ? 'Live (FPL API)' : 'Sample data')),
+    stat('Projections', model
+      ? h('span', { class: 'tag tag-live', title: `${model.history_gws} GWs of history` },
+          `Model ${model.model}`)
+      : h('span', { class: 'tag tag-sample' }, 'Heuristic')),
   ]));
 
   if (meta.source !== 'fpl-api') {
@@ -260,9 +273,9 @@ export function players(bundle) {
   wrap.append(
     card('Player explorer',
       h('div', {}, [controls, host, note(
-        'Click a column to sort. Proj5 = projected points over the next 5 GWs ' +
-        '(transparent heuristic — see docs/FEATURES.md). DC/90 = defensive ' +
-        'contributions per 90 for the new 2025/26 scoring.')])));
+        'Click a column to sort. Proj5 = projected points over the next 5 GWs. ' +
+        projectionBlurb(bundle) + ' DC/90 = defensive contributions per 90 for the ' +
+        'new 2025/26 scoring.')])));
   draw();
   return wrap;
 }
@@ -344,9 +357,9 @@ export function captains(bundle) {
   }));
 
   wrap.append(card('Captaincy rankings', list));
-  wrap.append(note('Projected = expected points for the next single fixture. Bars ' +
-    'break it into appearance, attacking return (xG/xA × fixture ease), clean-sheet ' +
-    'value and DEFCON. Consider a differential captain if chasing rank.'));
+  wrap.append(note(projectionBlurb(bundle) + ' Bars break the next-fixture projection ' +
+    'into appearance, attacking return, clean-sheet value and DEFCON. Consider a ' +
+    'differential captain if chasing rank.'));
   return wrap;
 }
 
@@ -399,10 +412,10 @@ export function transfers(bundle) {
     card('Transfer targets',
       h('div', {}, [tabs, h('div', { class: 'controls' },
         [h('label', { class: 'rangelbl' }, [h('span', { class: 'muted small' }, 'Max price '), price, priceOut])]),
-        host, note('Ranked by projected points over the next 5 GWs. Remember: each ' +
-          'extra transfer beyond your free one costs −4 pts — only take a hit if the ' +
-          'target is projected to out-score the alternative by more than 4 over the ' +
-          'coming weeks.')])),
+        host, note('Ranked by projected points over the next 5 GWs. ' +
+          projectionBlurb(bundle) + ' Remember: each extra transfer beyond your free ' +
+          'one costs −4 pts — only take a hit if the target is projected to out-score ' +
+          'the alternative by more than 4 over the coming weeks.')])),
     card('Consider selling', sell));
   draw();
   return wrap;

@@ -17,10 +17,11 @@ running as a static web app you can host **for free on GitHub Pages**.
 | **Transfers** | Best projected targets by position and budget, plus players to consider selling — with a reminder of the −4 hit maths. |
 | **Differentials** | Low-ownership (<10%) players with a strong projection, for climbing mini-leagues. |
 
-All recommendations are computed **in your browser** from data refreshed by a
-GitHub Action. The projection is a deliberately **explainable heuristic** — see
-[`docs/FEATURES.md`](docs/FEATURES.md) — not a black box, so you can always see
-*why* a player is suggested.
+Recommendations are driven by an **opponent-adjusted expected-points model**
+(`xpts-v1`) computed in the GitHub Action, with a transparent client-side
+heuristic as a fallback. The model is deliberately **explainable** (every
+projection comes with a breakdown) and is **backtested** against past gameweeks
+so we can tell it beats naive guessing — see [`docs/MODEL.md`](docs/MODEL.md).
 
 ## How it works (the clever bit)
 
@@ -59,19 +60,24 @@ No secrets or tokens required — it uses the built-in `GITHUB_TOKEN`.
 index.html            SPA entry point
 assets/css, assets/js  styles + app (data loader, analysis engine, views, router)
 data/                 committed JSON, refreshed by the Action
-scripts/              fetch_fpl_data.py (live) · make_sample_data.py (sample)
-docs/                 RULES.md · FEATURES.md · ARCHITECTURE.md
-.github/workflows/    pages.yml (refresh data + deploy)
+  history/            per-gameweek snapshots (training / backtest set)
+  projections.json    model output · backtest.json (accuracy report)
+scripts/              fetch_fpl_data.py · build_history.py · model.py
+                      projections.py · backtest.py · make_sample_data.py
+docs/                 RULES · FEATURES · ARCHITECTURE · MODEL · INFRASTRUCTURE
+.github/workflows/    pages.yml (history → data → projections → backtest → deploy)
 ```
 
 ## Docs
 - [`docs/RULES.md`](docs/RULES.md) — the FPL rules, structured (squad, transfers, chips, scoring incl. DEFCON).
-- [`docs/FEATURES.md`](docs/FEATURES.md) — feature research, the projection model, and the roadmap.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — data flow, the data contract, and analysis internals.
+- [`docs/MODEL.md`](docs/MODEL.md) — the expected-points model and how it's backtested.
+- [`docs/FEATURES.md`](docs/FEATURES.md) — feature research and the roadmap.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — data flow, the data contract, and internals.
+- [`docs/INFRASTRUCTURE.md`](docs/INFRASTRUCTURE.md) — what a backtested model needs, and the (free) options.
 
 ## Roadmap (short version)
-- **Now:** the views above, on live data.
-- **Next:** import your own squad by FPL team ID for personalised advice; free-transfer/hit break-even calculator; mini-league view.
-- **Later:** a fitted expected-points model backtested on history, a multi-week transfer & chip planner, and a squad optimiser.
+- **Done:** the views above; the opponent-adjusted expected-points model (`xpts-v1`) with a backtest harness and per-GW history snapshots.
+- **Next:** backfill history from a public dataset for real backtest numbers now; import your own squad by FPL team ID; free-transfer/hit break-even calculator.
+- **Later:** a gradient-boosted model, a multi-week transfer & chip planner, and a squad optimiser.
 
 See [`docs/FEATURES.md`](docs/FEATURES.md#roadmap) for the full plan.

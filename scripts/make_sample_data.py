@@ -11,14 +11,21 @@ Usage:  python scripts/make_sample_data.py [--out data]
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import random
 import sys
 from datetime import datetime, timedelta, timezone
 
 from fpl_common import write_dataset
+from model import DEFCON_THRESHOLD, GOAL_PTS
+from projections import project_all, write_projections
 
-CURRENT_GW = 2
-N_FUTURE_GWS = 8
+HISTORY_GWS = 8            # finished GWs simulated into data/history/
+CURRENT_GW = HISTORY_GWS   # last finished GW
+N_FUTURE_GWS = 8           # upcoming GWs with fixtures for projections
+NEXT_GW = CURRENT_GW + 1
+RNG = random.Random(42)    # deterministic sample data
 
 # --- Clubs: (id, name, short, strength, att_h, att_a, def_h, def_a) ---------
 TEAMS = [
@@ -91,73 +98,181 @@ P = [
 ]
 
 
-def build_players():
+SHORT = {t[0]: t[2] for t in TEAMS}
+STRENGTH = {t[0]: t[3] for t in TEAMS}
+ATT = {t[0]: (t[4] + t[5]) / 2 for t in TEAMS}
+DFN = {t[0]: (t[6] + t[7]) / 2 for t in TEAMS}
+AVG_ATT = sum(ATT.values()) / len(ATT)
+AVG_DFN = sum(DFN.values()) / len(DFN)
+
+
+def latent(row):
+    """Turn a roster row's headline numbers into per-match latent rates."""
+    (_web, _full, _team, pos, _price, status, _news, _form, _pts, minutes,
+     _g, _a, _cs, xg, xa, defcon, _sel, _ep, _cc) = row
+    nineties = max(0.5, minutes / 90)
+    start_p = {"a": 0.95, "d": 0.6, "i": 0.1, "s": 0.05, "u": 0.05}.get(status, 0.9)
+    if minutes < 160 and status == "a":
+        start_p = 0.8
+    return {
+        "pos": pos,
+        "xg90": xg / nineties,
+        "xa90": xa / nineties,
+        "defcon90": defcon / nineties,   # avg defensive-action count per 90
+        "start_p": start_p,
+    }
+
+
+def poisson(rng, lam):
+    """Knuth's Poisson sampler (small lambdas here)."""
+    import math
+    l, k, p = math.exp(-lam), 0, 1.0
+    while True:
+        k += 1
+        p *= rng.random()
+        if p <= l:
+            return k - 1
+
+
+def build_fixtures():
+    """Round-robin-ish fixtures GW1..(HISTORY_GWS+N_FUTURE_GWS)."""
+    team_ids = [t[0] for t in TEAMS]
+    base = datetime(2026, 6, 20, 14, 0, tzinfo=timezone.utc)
+    fixtures = []
+    total = HISTORY_GWS + N_FUTURE_GWS
+    for g in range(total):
+        gw = 1 + g
+        rot = team_ids[g % len(team_ids):] + team_ids[:g % len(team_ids)]
+        half = len(rot) // 2
+        homes, aways = rot[:half], rot[half:][::-1]
+        kickoff = base + timedelta(days=7 * g)
+        for hteam, ateam in zip(homes, aways):
+            fixtures.append({
+                "gw": gw, "team_h": hteam, "team_a": ateam,
+                "kickoff": kickoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "fdr_h": min(5, max(1, STRENGTH[ateam] - 2)),
+                "fdr_a": min(5, max(1, STRENGTH[hteam] - 1)),
+                "finished": gw <= HISTORY_GWS,
+            })
+    return fixtures
+
+
+def team_opp_map(fixtures, gw):
+    m = {}
+    for fx in fixtures:
+        if fx["gw"] != gw:
+            continue
+        m[fx["team_h"]] = (fx["team_a"], True)
+        m[fx["team_a"]] = (fx["team_h"], False)
+    return m
+
+
+def simulate_history(fixtures):
+    """Simulate HISTORY_GWS finished gameweeks → {gw: [rows]} + per-player totals."""
+    lat = {i + 1: latent(P[i]) for i in range(len(P))}
+    pos_by_id = {i + 1: P[i][3] for i in range(len(P))}
+    team_by_id = {i + 1: P[i][2] for i in range(len(P))}
+    history = {}
+
+    for gw in range(1, HISTORY_GWS + 1):
+        opp_map = team_opp_map(fixtures, gw)
+        rows = []
+        for pid, L in lat.items():
+            pos, team = pos_by_id[pid], team_by_id[pid]
+            opp, home = opp_map.get(team, (0, True))
+            played = RNG.random() < L["start_p"]
+            minutes = 0
+            if played:
+                minutes = 90 if RNG.random() < 0.8 else RNG.randint(60, 88)
+            elif RNG.random() < 0.15:
+                minutes = RNG.randint(10, 55)     # cameo
+            n90 = minutes / 90
+
+            # opponent-adjusted attacking output
+            amult = (AVG_DFN / DFN.get(opp, AVG_DFN)) * (1.08 if home else 0.94)
+            xg = max(0.0, RNG.gauss(L["xg90"] * n90 * amult, 0.15)) if minutes else 0.0
+            xa = max(0.0, RNG.gauss(L["xa90"] * n90 * amult, 0.12)) if minutes else 0.0
+            goals = poisson(RNG, xg) if minutes else 0
+            assists = poisson(RNG, xa) if minutes else 0
+            defcon = int(max(0, RNG.gauss(L["defcon90"] * n90, 2.0))) if minutes else 0
+
+            # goals conceded from strength mismatch
+            lam_conc = 1.3 * (ATT.get(opp, AVG_ATT) / AVG_DFN) * (0.9 if home else 1.1)
+            gc = poisson(RNG, lam_conc) if minutes else 0
+            cs = minutes >= 60 and gc == 0
+
+            pts = 0
+            if minutes > 0:
+                pts += 2 if minutes >= 60 else 1
+            pts += goals * GOAL_PTS.get(pos, 4) + assists * 3
+            if cs and pos in ("GKP", "DEF"):
+                pts += 4
+            elif cs and pos == "MID":
+                pts += 1
+            if pos in ("GKP", "DEF") and minutes >= 60:
+                pts -= gc // 2
+            if defcon >= DEFCON_THRESHOLD.get(pos, 12):
+                pts += 2
+            bonus = RNG.choice([0, 0, 0, 1, 2, 3]) if pts >= 6 else 0
+            pts += bonus
+
+            rows.append({
+                "id": pid, "pos": pos, "team": team, "opp": opp, "home": home,
+                "minutes": minutes, "xg": round(xg, 2), "xa": round(xa, 2),
+                "goals": goals, "assists": assists,
+                "defcon": defcon, "bonus": bonus, "gc": gc, "pts": max(0, pts),
+            })
+        history[gw] = rows
+    return history
+
+
+def players_from_history(history):
+    """Aggregate simulated history into current-season player rows."""
+    agg = {}
+    for gw in sorted(history):
+        for r in history[gw]:
+            a = agg.setdefault(r["id"], {"minutes": 0, "xg": 0.0, "xa": 0.0,
+                "goals": 0, "assists": 0, "defcon": 0, "bonus": 0, "cs": 0,
+                "pts": 0, "apps": 0, "recent": []})
+            a["minutes"] += r["minutes"]
+            a["xg"] += r["xg"]
+            a["xa"] += r["xa"]
+            a["goals"] += r["goals"]
+            a["assists"] += r["assists"]
+            a["defcon"] += r["defcon"]
+            a["bonus"] += r["bonus"]
+            a["pts"] += r["pts"]
+            if r["minutes"] > 0:
+                a["apps"] += 1
+            if r["minutes"] >= 60 and r["gc"] == 0 and r["pos"] in ("GKP", "DEF", "MID"):
+                a["cs"] += 1
+            a["recent"].append(r["pts"])
+
     players = []
-    for (web, full, team, pos, price, status, news, form, pts, minutes,
-         goals, assists, cs, xg, xa, defcon, sel, ep_next, ccev) in P:
-        xgi = round(xg + xa, 2)
-        defcon_per90 = round(defcon / minutes * 90, 2) if minutes else 0.0
-        games = max(1, minutes // 90)
+    for i, row in enumerate(P):
+        pid = i + 1
+        (web, full, team, pos, price, status, news, _form, _pts, _min,
+         _g, _a, _cs, _xg, _xa, _dc, sel, _ep, ccev) = row
+        a = agg[pid]
+        apps = max(1, a["apps"])
+        minutes = a["minutes"]
+        form = round(sum(a["recent"][-5:]) / min(5, len(a["recent"])), 1)
         players.append({
-            "id": len(players) + 1,
-            "name": full,
-            "web": web,
-            "team": team,
-            "team_short": next(t[2] for t in TEAMS if t[0] == team),
-            "pos": pos,
-            "price": price,
-            "status": status,
-            "news": news,
-            "form": form,
-            "pts": pts,
-            "ppg": round(pts / games, 1),
-            "sel": sel,
-            "minutes": minutes,
-            "goals": goals,
-            "assists": assists,
-            "cs": cs,
-            "xg": xg,
-            "xa": xa,
-            "xgi": xgi,
-            "defcon": defcon,
-            "defcon_per90": defcon_per90,
-            "ict": round((goals * 3 + assists * 2 + defcon * 0.3) * 2.2 + form, 1),
-            "bonus": max(0, round((pts - minutes / 90 * 2) * 0.2)),
-            "ep_next": ep_next,
+            "id": pid, "name": full, "web": web, "team": team,
+            "team_short": SHORT[team], "pos": pos, "price": price,
+            "status": status, "news": news, "form": form, "pts": a["pts"],
+            "ppg": round(a["pts"] / apps, 1), "sel": sel, "minutes": minutes,
+            "goals": a["goals"], "assists": a["assists"],
+            "cs": a["cs"], "xg": round(a["xg"], 1), "xa": round(a["xa"], 1),
+            "xgi": round(a["xg"] + a["xa"], 1), "defcon": a["defcon"],
+            "defcon_per90": round(a["defcon"] / minutes * 90, 2) if minutes else 0.0,
+            "ict": round((a["xg"] + a["xa"]) * 20 + a["defcon"] * 0.3 + form, 1),
+            "bonus": a["bonus"], "ep_next": form,
             "cost_change_event": ccev,
             "transfers_in_event": int(max(0, form) * 30000),
             "transfers_out_event": int(max(0, 6 - form) * 12000),
         })
     return players
-
-
-def build_fixtures():
-    """Round-robin-ish fixtures with FDR derived from opponent strength."""
-    team_ids = [t[0] for t in TEAMS]
-    strength = {t[0]: t[3] for t in TEAMS}
-    base = datetime(2026, 8, 22, 14, 0, tzinfo=timezone.utc)
-    fixtures = []
-    for g in range(N_FUTURE_GWS):
-        gw = CURRENT_GW + g
-        # simple rotating pairing so every team plays once per GW
-        rot = team_ids[g:] + team_ids[:g]
-        half = len(rot) // 2
-        homes, aways = rot[:half], rot[half:][::-1]
-        kickoff = base + timedelta(days=7 * g)
-        for h, a in zip(homes, aways):
-            # FDR 1(easy)–5(hard) from opponent strength, +/- for venue
-            fdr_h = min(5, max(1, strength[a] - 2))
-            fdr_a = min(5, max(1, strength[h] - 1))
-            fixtures.append({
-                "gw": gw,
-                "team_h": h,
-                "team_a": a,
-                "kickoff": kickoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "fdr_h": fdr_h,
-                "fdr_a": fdr_a,
-                "finished": gw < CURRENT_GW,
-            })
-    return fixtures
 
 
 def main(argv=None):
@@ -170,20 +285,32 @@ def main(argv=None):
         "att_home": ah, "att_away": aa, "def_home": dh, "def_away": da,
     } for (i, n, s, st, ah, aa, dh, da) in TEAMS]
 
-    next_deadline = datetime(2026, 8, 28, 18, 30, tzinfo=timezone.utc)
+    fixtures = build_fixtures()
+    history = simulate_history(fixtures)
+
+    # write history snapshots
+    hist_dir = os.path.join(args.out, "history")
+    os.makedirs(hist_dir, exist_ok=True)
+    for gw, rows in history.items():
+        with open(os.path.join(hist_dir, f"gw{gw:02d}.json"), "w", encoding="utf-8") as fh:
+            json.dump(rows, fh, ensure_ascii=False, separators=(",", ":"))
+            fh.write("\n")
+
+    players = players_from_history(history)
+
+    next_deadline = datetime(2026, 8, 21, 18, 30, tzinfo=timezone.utc)
     meta = {
-        "source": "sample",
-        "season": "2025/26",
-        "current_gw": CURRENT_GW,
-        "next_gw": CURRENT_GW + 1,
+        "source": "sample", "season": "2025/26",
+        "current_gw": CURRENT_GW, "next_gw": NEXT_GW,
         "next_deadline_utc": next_deadline.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "scoring": {
-            "squad_squadsize": 15, "squad_total_spend": 100.0,
-            "squad_team_limit": 3, "transfers_cost": 4, "transfers_limit": 5,
-        },
+        "scoring": {"squad_squadsize": 15, "squad_total_spend": 100.0,
+                    "squad_team_limit": 3, "transfers_cost": 4, "transfers_limit": 5},
     }
-    write_dataset(args.out, meta=meta, teams=teams, players=build_players(),
-                  fixtures=build_fixtures())
+    write_dataset(args.out, meta=meta, teams=teams, players=players, fixtures=fixtures)
+
+    # model projections from the simulated history
+    projections = project_all(players, teams, fixtures, meta, history)
+    write_projections(args.out, projections)
     return 0
 
 

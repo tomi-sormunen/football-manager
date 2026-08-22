@@ -21,6 +21,7 @@ import sys
 import urllib.request
 
 from fpl_common import write_dataset
+from projections import load_history, project_all, write_projections
 
 API = "https://fantasy.premierleague.com/api"
 HEADERS = {"User-Agent": "football-manager/1.0 (+github pages planning tool)"}
@@ -174,6 +175,13 @@ def main(argv=None):
     meta, teams, players, fixtures = transform(bootstrap, fixtures_raw)
     write_dataset(args.out, meta=meta, teams=teams, players=players,
                   fixtures=fixtures)
+
+    # Build model projections from any accumulated history (falls back to
+    # current-season totals when history is thin). Run build_history.py first
+    # in CI so this has the richest history to work with.
+    history = load_history(os.path.join(args.out, "history"))
+    projections = project_all(players, teams, fixtures, meta, history)
+    write_projections(args.out, projections)
     return 0
 
 
