@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FPL Manager — Fantasy Premier League planning aid</title>
+  <meta name="description" content="Data-backed Fantasy Premier League team planning: fixture difficulty, captain picks, transfer targets, value and differentials." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚽</span>
+      <div>
+        <h1>FPL Manager</h1>
+        <span class="tagline">Data-backed Fantasy Premier League planning</span>
+      </div>
+    </div>
+    <nav id="nav" class="nav"></nav>
+    <div class="meta"><span id="freshness" class="muted small"></span></div>
+  </header>
+
+  <main id="app" class="container"></main>
+
+  <footer class="foot">
+    <span class="muted small">
+      Not affiliated with the Premier League or FPL. Data from the public FPL API.
+      Projections are a transparent heuristic — see
+      <a href="https://github.com/tomi-sormunen/football-manager/blob/main/docs/FEATURES.md">docs</a>.
+    </span>
+  </footer>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
