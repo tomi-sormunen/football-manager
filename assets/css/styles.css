@@ -119,6 +119,8 @@ h1, h2, h3 { margin: 0; font-weight: 700; line-height: 1.2; }
 }
 .banner.error { background: color-mix(in srgb, var(--flag) 12%, var(--surface));
   border-color: color-mix(in srgb, var(--flag) 40%, var(--border)); }
+.banner.ok { background: color-mix(in srgb, var(--ok) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
 .banner pre { white-space: pre-wrap; margin: 8px 0 0; color: var(--text-dim); }
 
 /* Tables */

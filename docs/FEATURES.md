@@ -112,9 +112,12 @@ is intended to be **swapped/improved** over time (see roadmap Phase 3).
   accumulating the training/backtest set over the season.
 - ✅ **Backtest harness** (`backtest.py`) comparing the model against naive
   baselines (MAE / RMSE / correlation), reported to `data/backtest.json`.
-- ⬜ **Backfill history** from a public multi-season dataset so real backtest
-  numbers exist immediately (see [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)).
-- ⬜ Upgrade `xpts-v1` toward a gradient-boosted model once history is deep.
+- ✅ **Backfill history** from the public `vaastav/Fantasy-Premier-League`
+  dataset (`backfill_history.py`) so real backtest numbers exist immediately.
+  Backtested over 2022-23 + 2023-24 (30,797 samples), `xpts-v1` beats both
+  baselines on MAE, RMSE and correlation — see [`MODEL.md`](MODEL.md).
+- ⬜ Upgrade `xpts-v1` toward a gradient-boosted model now that deep history
+  is a `backfill_history.py` run away.
 - ⬜ Multi-week transfer **planner** (plan several GWs ahead, compare paths).
 - ⬜ Chip-timing optimiser using double/blank gameweek detection.
 

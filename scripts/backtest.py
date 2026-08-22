@@ -48,25 +48,26 @@ def _metrics(pairs):
             "corr": round(corr, 3) if corr is not None else None}
 
 
-def run_backtest(history, teams):
+def _evaluate_season(history, teams, acc):
+    """Evaluate one season's history, appending (pred, actual) pairs into `acc`.
+
+    Running baselines reset per season (player ids are only unique within a
+    season in the community dataset), but the pooled pairs give overall metrics.
+    """
     gws = sorted(history)
     pos_by_id = {}
     for gw in gws:
         for r in history[gw]:
             pos_by_id.setdefault(r["id"], r.get("pos", "MID"))
 
-    model_pairs, last_pairs, ppg_pairs = [], [], []
-    by_pos = {}
-
-    # Running per-player totals so the ppg baseline is O(n), not O(n^2).
-    pts_sum = {}     # id -> total points in GWs seen so far
-    apps = {}        # id -> appearances so far
-    last_pts = {}    # id -> points in the most recent GW
+    pts_sum, apps, last_pts = {}, {}, {}   # running per-player totals (this season)
+    evaluated = []
 
     for t in gws:
         if t >= MIN_GW:
             league = league_from(teams, {g: history[g] for g in gws if g < t})
             cum = build_cumulative(history, t, pos_by_id)
+            evaluated.append(t)
 
             for r in history[t]:
                 pid = r["id"]
@@ -79,27 +80,59 @@ def run_backtest(history, teams):
                                       r.get("home", True), league, "a")["exp"]
                 ppg = pts_sum.get(pid, 0) / apps[pid] if apps.get(pid) else 0.0
 
-                model_pairs.append((pred, actual))
-                last_pairs.append((last_pts.get(pid, ppg), actual))
-                ppg_pairs.append((ppg, actual))
-                by_pos.setdefault(pos, []).append((pred, actual))
+                acc["model"].append((pred, actual))
+                acc["last"].append((last_pts.get(pid, ppg), actual))
+                acc["ppg"].append((ppg, actual))
+                acc["by_pos"].setdefault(pos, []).append((pred, actual))
 
-        # advance running totals with this GW's outcomes
-        for r in history[t]:
+        for r in history[t]:               # advance running totals
             pid = r["id"]
             last_pts[pid] = r.get("pts", 0)
             if r.get("minutes", 0) > 0:
                 pts_sum[pid] = pts_sum.get(pid, 0) + r.get("pts", 0)
                 apps[pid] = apps.get(pid, 0) + 1
 
-    report = {
-        "model": _metrics(model_pairs),
-        "baseline_last": _metrics(last_pairs),
-        "baseline_ppg": _metrics(ppg_pairs),
-        "by_position": {pos: _metrics(pairs) for pos, pairs in sorted(by_pos.items())},
-        "gws_evaluated": [g for g in gws if g >= MIN_GW],
+    return evaluated
+
+
+def run_backtest(datasets):
+    """datasets: list of (label, history, teams). Returns a pooled report."""
+    acc = {"model": [], "last": [], "ppg": [], "by_pos": {}}
+    seasons = {}
+    for label, history, teams in datasets:
+        seasons[label] = _evaluate_season(history, teams, acc)
+    return {
+        "model": _metrics(acc["model"]),
+        "baseline_last": _metrics(acc["last"]),
+        "baseline_ppg": _metrics(acc["ppg"]),
+        "by_position": {pos: _metrics(p) for pos, p in sorted(acc["by_pos"].items())},
+        "seasons": {k: {"gws_evaluated": v} for k, v in seasons.items()},
     }
-    return report
+
+
+def discover_datasets(path, teams_fallback):
+    """Yield (label, history, teams) from `path`.
+
+    If `path` holds gwNN.json directly it's one dataset; otherwise each immediate
+    subdirectory containing gwNN.json is a dataset. teams.json in the dataset dir
+    is preferred, else `teams_fallback`.
+    """
+    def load_teams(dirpath):
+        local = os.path.join(dirpath, "teams.json")
+        src = local if os.path.exists(local) else teams_fallback
+        with open(src, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    direct = load_history(path)
+    if direct:
+        return [(os.path.basename(path.rstrip("/")) or "history", direct, load_teams(path))]
+
+    out = []
+    for name in sorted(os.listdir(path)):
+        sub = os.path.join(path, name)
+        if os.path.isdir(sub) and load_history(sub):
+            out.append((name, load_history(sub), load_teams(sub)))
+    return out
 
 
 def main(argv=None):
@@ -109,27 +142,32 @@ def main(argv=None):
     ap.add_argument("--out", default="data/backtest.json")
     args = ap.parse_args(argv)
 
-    history = load_history(args.history)
-    if not history:
-        print("No history found — run build_history.py (or make_sample_data.py) first.",
-              file=sys.stderr)
+    if not os.path.exists(args.history):
+        print(f"No history at {args.history} — run build_history.py, "
+              "backfill_history.py, or make_sample_data.py first.", file=sys.stderr)
         return 1
-    with open(args.teams, encoding="utf-8") as fh:
-        teams = json.load(fh)
+    datasets = discover_datasets(args.history, args.teams)
+    if not datasets:
+        print(f"No gameweek snapshots found under {args.history}.", file=sys.stderr)
+        return 1
 
-    report = run_backtest(history, teams)
+    report = run_backtest(datasets)
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=0)
         fh.write("\n")
 
     m, bl, bp = report["model"], report["baseline_last"], report["baseline_ppg"]
-    print(f"Backtest over {len(report['gws_evaluated'])} GWs, {m['n']} samples")
+    labels = ", ".join(report["seasons"].keys())
+    print(f"Backtest over [{labels}] — {m['n']} player-GW samples")
     print(f"  model         MAE {m['mae']}  RMSE {m['rmse']}  corr {m['corr']}")
     print(f"  baseline last MAE {bl['mae']}  RMSE {bl['rmse']}  corr {bl['corr']}")
     print(f"  baseline ppg  MAE {bp['mae']}  RMSE {bp['rmse']}  corr {bp['corr']}")
     if m["mae"] is not None and bl["mae"] is not None:
-        better = bl["mae"] - m["mae"]
-        print(f"  → model beats 'last' MAE by {better:+.3f} pts/player/GW")
+        print(f"  → model beats 'last' MAE by {bl['mae'] - m['mae']:+.3f}, "
+              f"'ppg' MAE by {bp['mae'] - m['mae']:+.3f} pts/player/GW")
+    for pos, met in report["by_position"].items():
+        print(f"    {pos}: MAE {met['mae']} (n={met['n']})")
     return 0
 
 

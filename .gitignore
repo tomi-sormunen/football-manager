@@ -14,3 +14,8 @@ Thumbs.db
 # Local scratch
 /tmp/
 *.log
+
+# Backfilled community-dataset history is large and regenerable from a public
+# source (scripts/backfill_history.py). Keep the small backtest result, not the
+# tens of MB of raw per-gameweek snapshots.
+data/backfill/*/
