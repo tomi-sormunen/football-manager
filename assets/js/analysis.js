@@ -212,6 +212,10 @@ export function watchList(bundle, { limit = 8 } = {}) {
 export function squad(bundle) {
   const e = bundle.entry;
   if (!e || !e.picks) return null;
+  // A built-in sample squad against live data is meaningless (its ids don't map
+  // to the real player pool) — treat it as "not loaded" so the UI prompts setup
+  // instead of showing a misleading placeholder team.
+  if (e.source === 'sample' && bundle.meta.source === 'fpl-api') return null;
   const byId = bundle.playerById;
   const resolved = e.picks
     .map((pk) => ({ pk, p: byId.get(pk.element) }))

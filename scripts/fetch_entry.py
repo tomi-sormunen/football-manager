@@ -18,10 +18,16 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 API = "https://fantasy.premierleague.com/api"
-HEADERS = {"User-Agent": "football-manager/1.0 (+github pages planning tool)"}
+# The FPL API rejects some non-browser user agents; use a browser-like one.
+HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (compatible; football-manager/1.0; "
+                   "+https://github.com/tomi-sormunen/football-manager)"),
+    "Accept": "application/json",
+}
 
 
 def _get(url):
@@ -83,6 +89,24 @@ def build_entry(team_id, entry, picks_resp, event):
     }
 
 
+def fetch_picks_with_fallback(team_id, start_event):
+    """Return (picks_resp, event). A GW's picks are only public AFTER its
+    deadline, so if the current GW isn't available yet we walk back to the most
+    recent gameweek that is (the last team you saved). Returns (None, None) if
+    no gameweek has public picks yet (true pre-season)."""
+    for ev in range(start_event, 0, -1):
+        url = f"{API}/entry/{team_id}/event/{ev}/picks/"
+        try:
+            return _get(url), ev
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                print(f"  GW{ev} picks not public yet ({e.code}); trying earlier…",
+                      file=sys.stderr)
+                continue
+            raise
+    return None, None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--entry", default=None)
@@ -90,12 +114,29 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     team_id = resolve_team_id(args.entry, args.out)
+
+    entry_url = f"{API}/entry/{team_id}/"
     try:
-        entry = _get(f"{API}/entry/{team_id}/")
-        event = pick_event(entry, args.out)
-        picks_resp = _get(f"{API}/entry/{team_id}/event/{event}/picks/")
+        entry = _get(entry_url)
+    except urllib.error.HTTPError as e:
+        print(f"ERROR GET {entry_url} → HTTP {e.code} {e.reason}. "
+              "Check the team id (the number in your FPL Points-page URL: "
+              ".../entry/<ID>/event/...).", file=sys.stderr)
+        return 1
     except Exception as exc:  # noqa: BLE001
-        print(f"ERROR fetching entry {team_id}: {exc}", file=sys.stderr)
+        print(f"ERROR GET {entry_url} → {exc}", file=sys.stderr)
+        return 1
+
+    start_event = pick_event(entry, args.out)
+    print(f"entry {team_id}: current_event={entry.get('current_event')}, "
+          f"starting picks lookup at GW{start_event}", file=sys.stderr)
+
+    picks_resp, event = fetch_picks_with_fallback(team_id, start_event)
+    if picks_resp is None:
+        print(f"No public picks for entry {team_id} yet — a gameweek's squad is "
+              "only exposed by the public API after that gameweek's deadline. "
+              "It will populate automatically once the deadline passes.",
+              file=sys.stderr)
         return 1
 
     data = build_entry(team_id, entry, picks_resp, event)

@@ -157,6 +157,13 @@ from the `FPL_TEAM_ID` repository variable, else `config.json`.
 ```
 `slot` 1–11 are the starting XI (1 = GK), 12–15 the bench in priority order.
 
+**Availability.** The public API only exposes a gameweek's picks **after that
+gameweek's deadline**, so right at the start of a season (before GW1's deadline)
+no squad is available yet. `fetch_entry.py` walks back from the current gameweek
+to the most recent one whose picks are public, and reports clearly when none are
+yet. Until a real squad loads, the app shows a setup prompt rather than the
+built-in sample squad (which only makes sense on a fully-sample dataset).
+
 **Optional live input.** `config.json` may set `entry_proxy` to a *transparent
 proxy* that forwards to the FPL API (a Cloudflare Worker, or a Supabase Edge
 Function). When set, the My Team view's team-id box fetches any manager live in
