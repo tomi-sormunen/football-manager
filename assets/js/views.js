@@ -469,9 +469,12 @@ export function myTeam(bundle) {
       parts.push(card('My Team', h('div', {}, [
         note('No squad loaded yet. Set your FPL team ID in config.json (or the ' +
           'FPL_TEAM_ID repository variable) and run the “Update FPL data” Action — ' +
-          'it fetches your team server-side and commits data/entry.json. The FPL ' +
-          'API can’t be called directly from the browser (CORS), so a live team-ID ' +
-          'box here needs a proxy (see docs/ARCHITECTURE.md).')])));
+          'it fetches your team server-side and commits data/entry.json.'),
+        note('Note: the public FPL API only exposes a gameweek’s squad after that ' +
+          'gameweek’s deadline. Right at the start of a season (before GW1’s ' +
+          'deadline) your team isn’t available yet and will populate automatically ' +
+          'once the deadline passes. A live team-ID box needs a proxy — see ' +
+          'docs/ARCHITECTURE.md.')])));
       wrap.replaceChildren(...parts);
       return;
     }
