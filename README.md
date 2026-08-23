@@ -12,6 +12,7 @@ running as a static web app you can host **for free on GitHub Pages**.
 |---|---|
 | **Dashboard** | Current gameweek, deadline countdown, top captain & value picks, price movers, a sell/watch list. |
 | **My Team** | Import your squad by FPL team ID: your XI/bench on a pitch with captain/vice, bank & value, projected GW total, injury alerts, and suggested transfers (5-GW gain, budget- and club-limit-aware, with −4 hit break-even). |
+| **Planner** | Multi-gameweek outlook (best-XI & bench projections, best captain, double/blank GW detection), chip-timing recommendations (TC / BB / Free Hit / Wildcard), and a transfer plan weighing 0/1/2 moves against −4 hits. |
 | **Players** | Sortable, filterable explorer — price, form, points-per-£m, xGI, **DEFCON per 90** (the new 2025/26 defensive scoring), ownership, and a projection over the next 5 GWs. |
 | **Fixtures** | Colour-coded Fixture Difficulty Ratings (FDR) ticker for the next 6 gameweeks, sorted by easiest run. |
 | **Captains** | Ranked captaincy picks with a transparent breakdown (appearance / attack / clean sheet / DEFCON). |
@@ -91,8 +92,8 @@ docs/                 RULES · FEATURES · ARCHITECTURE · MODEL · INFRASTRUCTU
 
 ## Roadmap (short version)
 - **Done:** the views above; the opponent-adjusted expected-points model (`xpts-v1`) with per-GW history snapshots, a backtest harness, and a **backfill from a public multi-season dataset** — `xpts-v1` beats naive baselines on real 2022-24 data ([`docs/MODEL.md`](docs/MODEL.md)).
-- **Next:** the **My Team** view — import your squad by FPL team ID for personalised captain & transfer advice (done); free-transfer count tracking and a mini-league view still to come.
-- **Later:** a gradient-boosted model, a multi-week transfer & chip planner, and a squad optimiser.
+- **Next:** **My Team** (squad import) and the **Planner** (multi-GW outlook, chip timing, transfer plan) are done; free-transfer count tracking and a mini-league view still to come.
+- **Later:** a gradient-boosted model, a combined multi-transfer optimiser, and a full squad optimiser.
 
 ### Get real backtest numbers now
 ```bash

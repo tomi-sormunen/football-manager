@@ -294,6 +294,146 @@ export function squadFlags(sq) {
   return sq.all.filter((p) => p.flagged);
 }
 
+// ---- Multi-transfer & chip planner ------------------------------------------
+
+// Fixtures per team in a gameweek (2 = double GW, 0 = blank GW for that team).
+export function fixtureCountByTeam(bundle, gw) {
+  const m = new Map();
+  for (const fx of bundle.fixtures) {
+    if (fx.gw !== gw) continue;
+    m.set(fx.team_h, (m.get(fx.team_h) || 0) + 1);
+    m.set(fx.team_a, (m.get(fx.team_a) || 0) + 1);
+  }
+  return m;
+}
+
+// Expected points for a player in a specific gameweek (sums both games of a
+// double GW; 0 on a blank). Uses the model's per-GW output when present.
+export function gwExp(p, gw) {
+  if (p.model && p.model.by_gw) {
+    return p.model.by_gw.filter((g) => g.gw === gw).reduce((s, g) => s + g.exp, 0);
+  }
+  return 0;
+}
+
+// Best valid XI from the 15 for a given per-player expected-points map.
+// Formation rules: exactly 1 GK, ≥3 DEF, ≥1 FWD, 11 total.
+export function bestXI(fifteen, expById) {
+  const byPos = { GKP: [], DEF: [], MID: [], FWD: [] };
+  for (const p of fifteen) (byPos[p.pos] || byPos.MID).push(p);
+  for (const pos of Object.keys(byPos)) {
+    byPos[pos].sort((a, b) => (expById.get(b.id) || 0) - (expById.get(a.id) || 0));
+  }
+  const gk = byPos.GKP.slice(0, 1);
+  let best = null;
+  for (let d = 3; d <= 5; d++) {
+    for (let f = 1; f <= 3; f++) {
+      const m = 10 - d - f;
+      if (m < 0 || m > 5) continue;
+      if (d > byPos.DEF.length || f > byPos.FWD.length || m > byPos.MID.length) continue;
+      const xi = [...gk, ...byPos.DEF.slice(0, d), ...byPos.MID.slice(0, m),
+        ...byPos.FWD.slice(0, f)];
+      const total = xi.reduce((s, p) => s + (expById.get(p.id) || 0), 0);
+      if (!best || total > best.total) {
+        const ids = new Set(xi.map((p) => p.id));
+        best = { xi, bench: fifteen.filter((p) => !ids.has(p.id)), total };
+      }
+    }
+  }
+  return best || { xi: fifteen.slice(0, 11), bench: fifteen.slice(11), total: 0 };
+}
+
+// Per-gameweek outlook across the horizon for the manager's 15.
+export function gameweekOutlook(bundle, sq, horizon = 6) {
+  const startGw = bundle.meta.next_gw;
+  const out = [];
+  for (let i = 0; i < horizon; i++) {
+    const gw = startGw + i;
+    const counts = fixtureCountByTeam(bundle, gw);
+    const expById = new Map(sq.all.map((p) => [p.id, gwExp(p, gw)]));
+    const { xi, bench, total } = bestXI(sq.all, expById);
+    const captain = xi
+      .map((p) => ({ p, exp: expById.get(p.id) || 0 }))
+      .sort((a, b) => b.exp - a.exp)[0] || null;
+    const doubles = sq.all.filter((p) => (counts.get(p.team) || 0) >= 2);
+    const blanks = sq.all.filter((p) => (counts.get(p.team) || 0) === 0);
+    out.push({
+      gw, xi, bench, captain,
+      xiProj: +total.toFixed(1),
+      benchProj: +bench.reduce((s, p) => s + (expById.get(p.id) || 0), 0).toFixed(1),
+      doubles, blanks,
+    });
+  }
+  return out;
+}
+
+// Chip-timing recommendations from the outlook + squad.
+export function chipRecommendations(bundle, outlook, sq) {
+  const recs = [];
+  const byMax = (key) => outlook.slice().sort((a, b) => b[key] - a[key])[0];
+
+  // Triple Captain — where the captain projects highest.
+  const tc = outlook.slice()
+    .sort((a, b) => (b.captain?.exp || 0) - (a.captain?.exp || 0))[0];
+  if (tc && tc.captain) {
+    const dgw = tc.doubles.some((p) => p.id === tc.captain.p.id);
+    recs.push({ chip: 'Triple Captain', gw: tc.gw,
+      detail: `${tc.captain.p.web} projects ${tc.captain.exp.toFixed(1)} in GW${tc.gw}`
+        + (dgw ? ' (a double gameweek — plays twice)' : '')
+        + `. Tripling instead of doubling adds ~${tc.captain.exp.toFixed(1)} pts.` });
+  }
+
+  // Bench Boost — where the bench projects highest.
+  const bb = byMax('benchProj');
+  if (bb) {
+    const dgwCount = bb.doubles.length;
+    recs.push({ chip: 'Bench Boost', gw: bb.gw,
+      detail: `Your bench projects ${bb.benchProj.toFixed(1)} pts in GW${bb.gw}`
+        + (dgwCount ? ` (${dgwCount} of your players play twice)` : '')
+        + '. Strongest bench week in the horizon.' });
+  }
+
+  // Free Hit — the weakest week for your actual squad (e.g. a blank GW).
+  const fh = outlook.slice().sort((a, b) => a.xiProj - b.xiProj)[0];
+  if (fh) {
+    const blanks = fh.blanks.length;
+    recs.push({ chip: 'Free Hit', gw: fh.gw,
+      detail: blanks
+        ? `${blanks} of your players blank in GW${fh.gw} (XI projects only `
+          + `${fh.xiProj.toFixed(1)}). A Free Hit fields a full one-off team.`
+        : `Your weakest projected week (XI ${fh.xiProj.toFixed(1)} in GW${fh.gw}); `
+          + 'consider a Free Hit if it coincides with a blank.' });
+  }
+
+  // Wildcard — recommend when many beneficial transfers are stacking up.
+  const sugg = transferSuggestions(bundle, sq, { limit: 15 });
+  const strong = sugg.filter((s) => s.gain >= 3);
+  recs.push({ chip: 'Wildcard', gw: strong.length >= 4 ? bundle.meta.next_gw : null,
+    detail: strong.length >= 4
+      ? `${strong.length} of your players have clearly better replacements — a `
+        + 'Wildcard rebuilds without −4 hits.'
+      : `Only ${strong.length} strong upgrade${strong.length === 1 ? '' : 's'} `
+        + 'available — hold the Wildcard; single transfers are enough for now.' });
+  return recs;
+}
+
+// Recommend how many transfers to make for the next GW given free transfers,
+// weighing 5-GW projected gain against −4 hits. Returns the best 0/1/2 plan.
+export function transferPlan(bundle, sq, freeTransfers = 1) {
+  const sugg = transferSuggestions(bundle, sq, { limit: 3 });
+  const byK = [];
+  for (let k = 0; k <= Math.min(2, sugg.length); k++) {
+    const chosen = sugg.slice(0, k);
+    const gain = chosen.reduce((s, x) => s + x.gain, 0);
+    const hits = Math.max(0, k - freeTransfers);
+    const cost = hits * 4;
+    byK.push({ k, transfers: chosen, gain: +gain.toFixed(1), hits,
+      net: +(gain - cost).toFixed(1) });
+  }
+  const best = byK.slice().sort((a, b) => b.net - a.net)[0];
+  return { recommend: best, byK, freeTransfers };
+}
+
 // Price movers this gameweek.
 export function priceMovers(bundle, limit = 6) {
   const risers = bundle.players.filter((p) => p.cost_change_event > 0)

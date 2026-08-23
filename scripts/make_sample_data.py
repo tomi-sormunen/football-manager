@@ -147,14 +147,30 @@ def build_fixtures():
         homes, aways = rot[:half], rot[half:][::-1]
         kickoff = base + timedelta(days=7 * g)
         for hteam, ateam in zip(homes, aways):
-            fixtures.append({
-                "gw": gw, "team_h": hteam, "team_a": ateam,
-                "kickoff": kickoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "fdr_h": min(5, max(1, STRENGTH[ateam] - 2)),
-                "fdr_a": min(5, max(1, STRENGTH[hteam] - 1)),
-                "finished": gw <= HISTORY_GWS,
-            })
+            fixtures.append(_fixture(gw, hteam, ateam, kickoff))
+
+    # Inject a double gameweek and a blank gameweek within the projection horizon
+    # (next_gw=9 → GW9-14) so the planner has something to plan around.
+    dgw, bgw = 11, 12
+    kdgw = base + timedelta(days=7 * (dgw - 1) + 3)
+    for hteam, ateam in [(1, 10), (11, 6)]:            # ARS·LIV, MCI·CHE get a 2nd game
+        fixtures.append(_fixture(dgw, hteam, ateam, kdgw))
+    # Blank: drop the GW12 fixtures involving BOU(3), BRE(4) and their opponents.
+    blank_teams = {3, 4}
+    fixtures = [f for f in fixtures
+                if not (f["gw"] == bgw and (f["team_h"] in blank_teams
+                                            or f["team_a"] in blank_teams))]
     return fixtures
+
+
+def _fixture(gw, hteam, ateam, kickoff):
+    return {
+        "gw": gw, "team_h": hteam, "team_a": ateam,
+        "kickoff": kickoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "fdr_h": min(5, max(1, STRENGTH[ateam] - 2)),
+        "fdr_a": min(5, max(1, STRENGTH[hteam] - 1)),
+        "finished": gw <= HISTORY_GWS,
+    }
 
 
 def team_opp_map(fixtures, gw):

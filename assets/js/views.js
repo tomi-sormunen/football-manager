@@ -616,5 +616,130 @@ function teamIdCard(bundle, rerender) {
       target: '_blank', rel: 'noopener' }, 'Where do I find this?')]));
 }
 
-export const VIEWS = { dashboard, myteam: myTeam, players, fixtures, captains,
+// ---- Planner (multi-transfer & chip timing) ---------------------------------
+
+const CHIP_EMOJI = { 'Triple Captain': '👑', 'Bench Boost': '🪑',
+  'Free Hit': '🎯', 'Wildcard': '🃏' };
+
+export function planner(bundle) {
+  const wrap = h('div', { class: 'view' });
+  const sq = A.squad(bundle);
+
+  if (!sq) {
+    wrap.append(card('Planner', note('Load your squad first (see the My Team tab) — ' +
+      'the planner works from your 15 players, their projections and the fixtures.')));
+    return wrap;
+  }
+  if (!A.hasModel(bundle)) {
+    wrap.append(card('Planner', note('The planner needs model projections ' +
+      '(data/projections.json). Run the “Update FPL data” Action to generate them.')));
+    return wrap;
+  }
+
+  const horizon = Math.min(6, bundle.projections.meta.horizon || 6);
+  const outlook = A.gameweekOutlook(bundle, sq, horizon);
+
+  // free-transfer control (persisted per browser)
+  let ft = 1;
+  try { ft = Math.max(0, Math.min(5, +(localStorage.getItem('fpl_ft') ?? 1))); }
+  catch { ft = 1; }
+
+  const planHost = h('div', {});
+  const drawPlan = () => {
+    const plan = A.transferPlan(bundle, sq, ft);
+    planHost.replaceChildren(renderPlan(bundle, plan));
+  };
+
+  const ftInput = h('input', { type: 'number', min: '0', max: '5', value: String(ft),
+    class: 'teamid', style: 'min-width:64px',
+    oninput: (e) => { ft = Math.max(0, Math.min(5, +e.target.value || 0));
+      try { localStorage.setItem('fpl_ft', String(ft)); } catch { /* ignore */ }
+      drawPlan(); } });
+
+  // 1) Gameweek outlook
+  wrap.append(card('Gameweek outlook', outlookTable(bundle, outlook, sq),
+    h('span', { class: 'muted small' }, `Next ${horizon} GWs`)));
+
+  // 2) Chip recommendations
+  const recs = A.chipRecommendations(bundle, outlook, sq);
+  wrap.append(card('Chip timing', h('div', { class: 'chips' }, recs.map((r) =>
+    h('div', { class: 'chiprec' }, [
+      h('div', { class: 'chiprec-head' }, [
+        h('span', { class: 'chip-emoji' }, CHIP_EMOJI[r.chip] || '•'),
+        h('span', { class: 'chip-title' }, r.chip),
+        r.gw ? h('span', { class: 'tag tag-live' }, `GW${r.gw}`)
+          : h('span', { class: 'tag tag-sample' }, 'Hold')]),
+      h('p', { class: 'muted small' }, r.detail),
+    ])))));
+
+  // 3) Transfer plan
+  wrap.append(card('Transfer plan — next GW', h('div', {}, [
+    h('div', { class: 'controls' }, [
+      h('label', { class: 'rangelbl' },
+        [h('span', { class: 'muted small' }, 'Free transfers available '), ftInput])]),
+    planHost]), h('span', { class: 'muted small' }, `GW${bundle.meta.next_gw}`)));
+  drawPlan();
+
+  wrap.append(note('Projections are opponent-adjusted expected points (see MODEL.md). ' +
+    'Chip picks use the strongest week in the horizon for each chip; the transfer plan ' +
+    'weighs 5-GW projected gain against −4 hits. Double/blank gameweeks are read from ' +
+    'the fixtures.'));
+  return wrap;
+}
+
+function outlookTable(bundle, outlook, sq) {
+  const cols = [
+    { key: 'gw', label: 'GW', get: (r) => r.gw, sortable: false,
+      fmt: (v, r) => h('span', {}, [h('strong', {}, `GW${v}`),
+        r.doubles.length ? h('span', { class: 'gw-tag dgw', title: 'Double GW players' },
+          ` ×${r.doubles.length}D`) : null,
+        r.blanks.length ? h('span', { class: 'gw-tag bgw', title: 'Blank GW players' },
+          ` ${r.blanks.length}B`) : null]) },
+    { key: 'xi', label: 'XI proj', align: 'right', get: (r) => r.xiProj, sortable: false,
+      fmt: (v) => h('strong', {}, v.toFixed(1)) },
+    { key: 'bench', label: 'Bench', align: 'right', get: (r) => r.benchProj, sortable: false,
+      fmt: (v) => v.toFixed(1) },
+    { key: 'cap', label: 'Best captain', get: (r) => r.captain, sortable: false,
+      fmt: (_v, r) => r.captain
+        ? h('span', {}, [h('span', { class: 'pname' }, r.captain.p.web),
+          h('span', { class: 'muted small' }, ` ${r.captain.exp.toFixed(1)}`)]) : '—' },
+    { key: 'note', label: '', get: (r) => r, sortable: false, fmt: (_v, r) => {
+      if (r.blanks.length) return h('span', { class: 'muted small' },
+        `${r.blanks.length} blank${r.blanks.length > 1 ? 's' : ''}`);
+      if (r.doubles.length) return h('span', { class: 'pos-ok' },
+        `${r.doubles.length} play twice`);
+      return h('span', { class: 'muted small' }, '');
+    } },
+  ];
+  return h('div', { class: 'table-wrap' }, table(cols, outlook));
+}
+
+function renderPlan(bundle, plan) {
+  const rec = plan.recommend;
+  const head = rec.k === 0
+    ? h('p', {}, [okTick(), ' ', b('Roll your transfer'),
+      ' — no move beats holding over the next 5 GWs.'])
+    : h('p', {}, [h('strong', {}, `Make ${rec.k} transfer${rec.k > 1 ? 's' : ''}`),
+      rec.hits ? h('span', { class: 'arrow down' }, ` (−${rec.hits * 4} hit)`) : null,
+      ` — projected net +${rec.net.toFixed(1)} pts over 5 GWs.`]);
+
+  const rows = rec.transfers.length ? table([
+    { key: 'out', label: 'Out', get: (r) => r.out.web, sortable: false,
+      fmt: (_v, r) => playerCell(r.out) },
+    { key: 'in', label: 'In', get: (r) => r.in.web, sortable: false,
+      fmt: (_v, r) => playerCell(r.in) },
+    { key: 'gain', label: 'Gain (5GW)', align: 'right', get: (r) => r.gain, sortable: false,
+      fmt: (v) => h('strong', {}, `+${v.toFixed(1)}`) },
+  ], rec.transfers) : null;
+
+  // compare the 0/1/2 options
+  const compare = h('div', { class: 'plan-compare' }, plan.byK.map((o) =>
+    h('span', { class: 'plan-opt' + (o.k === rec.k ? ' on' : '') },
+      `${o.k} transfer${o.k === 1 ? '' : 's'}: net ${o.net >= 0 ? '+' : ''}${o.net.toFixed(1)}`
+      + (o.hits ? ` (−${o.hits * 4})` : ''))));
+
+  return h('div', {}, [head, rows, compare].filter(Boolean));
+}
+
+export const VIEWS = { dashboard, myteam: myTeam, planner, players, fixtures, captains,
   transfers, differentials };
