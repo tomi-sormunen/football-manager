@@ -127,6 +127,18 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON):
     pos_by_id = {p["id"]: p["pos"] for p in players}
     status_by_id = {p["id"]: p.get("status", "a") for p in players}
 
+    # Guard against history that doesn't represent the current player pool
+    # (e.g. leftover sample snapshots on a live dataset, or a season rollover):
+    # if few of today's players appear in it, ignore it and use season totals.
+    if history:
+        current_ids = {p["id"] for p in players}
+        hist_ids = {r["id"] for rows in history.values() for r in rows}
+        overlap = len(current_ids & hist_ids) / max(1, len(current_ids))
+        if overlap < 0.5:
+            print(f"WARN history covers only {overlap:.0%} of current players — "
+                  "ignoring it as unrepresentative; using current-season totals.")
+            history = {}
+
     league = league_from(teams, history)
     if history:
         cum = build_cumulative(history, next_gw, pos_by_id)
