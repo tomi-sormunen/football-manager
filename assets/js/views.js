@@ -646,7 +646,7 @@ export function planner(bundle) {
 
   const planHost = h('div', {});
   const drawPlan = () => {
-    const plan = A.transferPlan(bundle, sq, ft);
+    const plan = A.optimiseTransfers(bundle, sq, { freeTransfers: ft, maxTransfers: 3 });
     planHost.replaceChildren(renderPlan(bundle, plan));
   };
 
@@ -681,9 +681,11 @@ export function planner(bundle) {
   drawPlan();
 
   wrap.append(note('Projections are opponent-adjusted expected points (see MODEL.md). ' +
-    'Chip picks use the strongest week in the horizon for each chip; the transfer plan ' +
-    'weighs 5-GW projected gain against −4 hits. Double/blank gameweeks are read from ' +
-    'the fixtures.'));
+    'Chip picks use the strongest week in the horizon for each chip. The transfer plan ' +
+    'is a combined optimiser: it jointly chooses the best set of up to 3 like-for-like ' +
+    'moves that maximises 5-GW net gain within your bank and the 3-per-club limit, ' +
+    'after −4 hits. Double/blank gameweeks are read from the fixtures. Sell prices are ' +
+    'approximated by current price (the public API hides exact sell value).'));
   return wrap;
 }
 
@@ -718,21 +720,27 @@ function renderPlan(bundle, plan) {
   const rec = plan.recommend;
   const head = rec.k === 0
     ? h('p', {}, [okTick(), ' ', b('Roll your transfer'),
-      ' — no move beats holding over the next 5 GWs.'])
+      ' — no combination of moves beats holding over the next 5 GWs.'])
     : h('p', {}, [h('strong', {}, `Make ${rec.k} transfer${rec.k > 1 ? 's' : ''}`),
       rec.hits ? h('span', { class: 'arrow down' }, ` (−${rec.hits * 4} hit)`) : null,
-      ` — projected net +${rec.net.toFixed(1)} pts over 5 GWs.`]);
+      ` — projected net +${rec.net.toFixed(1)} pts over 5 GWs`,
+      rec.cost !== 0 ? h('span', { class: 'muted small' },
+        `, ${rec.cost > 0 ? 'spends' : 'frees'} £${Math.abs(rec.cost).toFixed(1)}m`) : null,
+      '.']);
 
   const rows = rec.transfers.length ? table([
     { key: 'out', label: 'Out', get: (r) => r.out.web, sortable: false,
       fmt: (_v, r) => playerCell(r.out) },
     { key: 'in', label: 'In', get: (r) => r.in.web, sortable: false,
       fmt: (_v, r) => playerCell(r.in) },
+    { key: 'cost', label: 'Cost', align: 'right', get: (r) => r.cost, sortable: false,
+      fmt: (v) => h('span', { class: 'muted small' },
+        `${v > 0 ? '+' : ''}£${v.toFixed(1)}m`) },
     { key: 'gain', label: 'Gain (5GW)', align: 'right', get: (r) => r.gain, sortable: false,
       fmt: (v) => h('strong', {}, `+${v.toFixed(1)}`) },
   ], rec.transfers) : null;
 
-  // compare the 0/1/2 options
+  // compare the 0/1/2/3 options
   const compare = h('div', { class: 'plan-compare' }, plan.byK.map((o) =>
     h('span', { class: 'plan-opt' + (o.k === rec.k ? ' on' : '') },
       `${o.k} transfer${o.k === 1 ? '' : 's'}: net ${o.net >= 0 ? '+' : ''}${o.net.toFixed(1)}`

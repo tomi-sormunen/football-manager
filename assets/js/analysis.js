@@ -434,6 +434,113 @@ export function transferPlan(bundle, sq, freeTransfers = 1) {
   return { recommend: best, byK, freeTransfers };
 }
 
+// Combined multi-transfer optimiser.
+//
+// Unlike transferPlan (which sums the best *independent* per-slot swaps), this
+// JOINTLY selects the best set of up to `maxTransfers` like-for-like swaps that
+// maximises net projected points over the horizon, subject to the real
+// constraints: total spend within the bank, the 3-per-club limit on the
+// resulting squad, and distinct players in/out. Sell prices are approximated by
+// current price (the public API hides exact sell value).
+//
+// Returns { byK: [{k, transfers, gain, cost, hits, net}], recommend }.
+export function optimiseTransfers(bundle, sq, {
+  freeTransfers = 1, maxTransfers = 3, horizon = 5, perSlot = 5,
+} = {}) {
+  const bank = sq.entry.bank ?? 0;
+  const ownedIds = new Set(sq.all.map((p) => p.id));
+  const perClub = {};
+  for (const p of sq.all) perClub[p.team] = (perClub[p.team] || 0) + 1;
+
+  const projCache = new Map();
+  const proj = (p) => {
+    if (!projCache.has(p.id)) projCache.set(p.id, projectPlayer(bundle, p, horizon).total);
+    return projCache.get(p.id);
+  };
+
+  // Build a bounded candidate pool: positive-gain, same-position, available
+  // replacements, keeping the best `perSlot` per owned player.
+  const pool = [];
+  for (const out of sq.all) {
+    const outProj = proj(out);
+    const cands = [];
+    for (const cand of bundle.players) {
+      if (cand.pos !== out.pos || ownedIds.has(cand.id) || cand.flagged
+          || cand.minutes <= 0) continue;
+      const cost = +(cand.price - out.price).toFixed(1);   // sell ≈ current price
+      if (cost - bank > 1e-9) continue;                    // individually affordable
+      const gain = +(proj(cand) - outProj).toFixed(2);
+      if (gain <= 0) continue;
+      cands.push({ out, in: cand, gain, cost });
+    }
+    cands.sort((a, b) => b.gain - a.gain);
+    pool.push(...cands.slice(0, perSlot));
+  }
+  pool.sort((a, b) => b.gain - a.gain);
+  const cap = pool.slice(0, 40);                           // bound the search
+
+  const hitCost = (k) => Math.max(0, k - freeTransfers) * 4;
+  const clubOK = (combo) => {
+    const delta = {};
+    for (const t of combo) {
+      delta[t.out.team] = (delta[t.out.team] || 0) - 1;
+      delta[t.in.team] = (delta[t.in.team] || 0) + 1;
+    }
+    return Object.entries(delta).every(([team, d]) => (perClub[team] || 0) + d <= 3);
+  };
+  const record = (combo) => {
+    const gain = combo.reduce((s, t) => s + t.gain, 0);
+    const cost = combo.reduce((s, t) => s + t.cost, 0);
+    return { k: combo.length, transfers: combo, gain: +gain.toFixed(1),
+      cost: +cost.toFixed(1), hits: Math.max(0, combo.length - freeTransfers),
+      net: +(gain - hitCost(combo.length)).toFixed(1) };
+  };
+
+  const byK = [record([])];
+  const bestOf = (combos) => combos.reduce((b, c) => (!b || c.net > b.net ? c : b), null);
+
+  // k = 1
+  const k1 = [];
+  for (const t of cap) if (t.cost - bank <= 1e-9 && clubOK([t])) k1.push(record([t]));
+  byK.push(bestOf(k1) || { k: 1, transfers: [], gain: 0, cost: 0,
+    hits: Math.max(0, 1 - freeTransfers), net: -hitCost(1) });
+
+  // k = 2 and k = 3 — bounded nested search over the capped pool.
+  const searchK = (k) => {
+    let best = null;
+    const combo = [];
+    const usedOut = new Set(), usedIn = new Set();
+    const dfs = (start) => {
+      if (combo.length === k) {
+        const cost = combo.reduce((s, t) => s + t.cost, 0);
+        if (cost - bank <= 1e-9 && clubOK(combo)) {
+          const rec = record(combo.slice());
+          if (!best || rec.net > best.net) best = rec;
+        }
+        return;
+      }
+      for (let i = start; i < cap.length; i++) {
+        const t = cap[i];
+        if (usedOut.has(t.out.id) || usedIn.has(t.in.id)) continue;
+        combo.push(t); usedOut.add(t.out.id); usedIn.add(t.in.id);
+        dfs(i + 1);
+        combo.pop(); usedOut.delete(t.out.id); usedIn.delete(t.in.id);
+      }
+    };
+    dfs(0);
+    return best;
+  };
+  for (let k = 2; k <= Math.min(maxTransfers, 3); k++) {
+    const best = searchK(k);
+    byK.push(best || { k, transfers: [], gain: 0, cost: 0,
+      hits: Math.max(0, k - freeTransfers), net: -hitCost(k) });
+  }
+
+  // Recommend the highest net; tie-break toward fewer transfers.
+  const recommend = byK.slice().sort((a, b) => b.net - a.net || a.k - b.k)[0];
+  return { byK, recommend, freeTransfers, bank };
+}
+
 // Price movers this gameweek.
 export function priceMovers(bundle, limit = 6) {
   const risers = bundle.players.filter((p) => p.cost_change_event > 0)
