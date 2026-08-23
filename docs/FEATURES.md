@@ -140,11 +140,15 @@ is intended to be **swapped/improved** over time (see roadmap Phase 3).
     optimiser is Phase 4).
 
 ### Phase 4 — Optimisation & polish
-- Squad optimiser (best XI / best 15 under £100m and the 3-per-club limit) via
-  a linear/greedy solver in the browser — and a combined multi-transfer optimiser
-  (jointly chosen moves, not one-per-slot).
-- Automated captaincy & transfer "what-if" simulation.
-- Notifications ahead of deadlines.
+- ✅ **Combined multi-transfer optimiser** (`optimiseTransfers`) — jointly
+  chooses the best set of up to 3 like-for-like moves that maximises 5-GW net
+  gain within the bank and the 3-per-club limit (after −4 hits), replacing the
+  per-slot summation in the Planner's transfer plan. Bounded search over a
+  capped candidate pool keeps it fast on the full player list.
+- ⬜ Full squad optimiser (best XI / best 15 under £100m and the 3-per-club
+  limit) via a linear/greedy solver in the browser.
+- ⬜ Automated captaincy & transfer "what-if" simulation.
+- ⬜ Notifications ahead of deadlines.
 
 ## Explicitly out of scope (for now)
 - Making transfers *for* you (the official API has no public write access;
