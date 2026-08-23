@@ -11,8 +11,8 @@
 ```
                     (scheduled + manual)
   ┌─────────────────────────────────────────┐
-  │  GitHub Action: update-data.yml          │
-  │  runs scripts/fetch_fpl_data.py          │
+  │  GitHub Action: pages.yml (build job)    │
+  │  runs fetch_fpl_data.py + fetch_entry.py │
   │                                          │
   │  FPL API  ──►  transform  ──►  data/*.json│
   │  (server-to-server, no CORS)             │
@@ -22,7 +22,7 @@
                       │  push
                       ▼
   ┌──────────────────────────────────────────┐
-  │  GitHub Action: deploy.yml → GitHub Pages │
+  │  pages.yml (deploy job) → GitHub Pages     │
   └───────────────────┬──────────────────────┘
                       │
                       ▼
@@ -68,10 +68,11 @@ football-manager/
 │   ├── projections.py      # history + model → projections.json
 │   ├── backtest.py         # replay past GWs, report accuracy
 │   └── make_sample_data.py # schema-matching sample dataset (+ synthetic history)
-├── docs/                   # RULES.md, FEATURES.md, ARCHITECTURE.md
+├── docs/                   # RULES.md, FEATURES.md, ARCHITECTURE.md, …
 └── .github/workflows/
-    ├── update-data.yml     # schedule + manual: refresh data, commit
-    └── deploy.yml          # deploy the site to GitHub Pages
+    ├── pages.yml           # "Update data & deploy to Pages": refresh data
+    │                       #   + entry + projections + backtest, then deploy
+    └── backfill.yml        # "Backfill history & backtest" (manual)
 ```
 
 No build step, no framework, no npm install — plain ES-module JavaScript so the

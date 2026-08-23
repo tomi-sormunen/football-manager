@@ -71,7 +71,7 @@ async function main() {
   } catch (err) {
     app.replaceChildren(errorBox(
       'Could not load the dataset. If this is a fresh deploy, run the ' +
-      '“Update FPL data” GitHub Action (or `python scripts/make_sample_data.py`) ' +
+      '“Update data & deploy to Pages” GitHub Action (or `python scripts/make_sample_data.py`) ' +
       'to generate data/.', err));
     return;
   }
