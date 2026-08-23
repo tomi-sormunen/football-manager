@@ -157,7 +157,7 @@ export function dashboard(bundle) {
 
   if (meta.source !== 'fpl-api') {
     wrap.appendChild(h('div', { class: 'banner' },
-      'Showing built-in sample data. Enable the “Update FPL data” GitHub Action ' +
+      'Showing built-in sample data. Enable the “Update data & deploy to Pages” GitHub Action ' +
       'to populate live prices, form and fixtures.'));
   }
 
@@ -468,7 +468,7 @@ export function myTeam(bundle) {
     if (!sq) {
       parts.push(card('My Team', h('div', {}, [
         note('No squad loaded yet. Set your FPL team ID in config.json (or the ' +
-          'FPL_TEAM_ID repository variable) and run the “Update FPL data” Action — ' +
+          'FPL_TEAM_ID repository variable) and run the “Update data & deploy to Pages” Action — ' +
           'it fetches your team server-side and commits data/entry.json.'),
         note('Note: the public FPL API only exposes a gameweek’s squad after that ' +
           'gameweek’s deadline. Right at the start of a season (before GW1’s ' +
@@ -635,7 +635,7 @@ export function planner(bundle) {
   }
   if (!A.hasModel(bundle)) {
     wrap.append(card('Planner', note('The planner needs model projections ' +
-      '(data/projections.json). Run the “Update FPL data” Action to generate them.')));
+      '(data/projections.json). Run the “Update data & deploy to Pages” Action to generate them.')));
     return wrap;
   }
 
