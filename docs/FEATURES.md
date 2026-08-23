@@ -125,12 +125,24 @@ is intended to be **swapped/improved** over time (see roadmap Phase 3).
   baselines on MAE, RMSE and correlation — see [`MODEL.md`](MODEL.md).
 - ⬜ Upgrade `xpts-v1` toward a gradient-boosted model now that deep history
   is a `backfill_history.py` run away.
-- ⬜ Multi-week transfer **planner** (plan several GWs ahead, compare paths).
-- ⬜ Chip-timing optimiser using double/blank gameweek detection.
+
+### Phase 3b — Planner  ✅
+- ✅ **Multi-transfer & chip planner** (the **Planner** view):
+  - **Gameweek outlook** over the next 6 GWs — best-XI and bench projections,
+    the best captain each week, and **double / blank gameweek** detection for
+    your own players (from the fixtures).
+  - **Chip timing** — recommends the best week in the horizon for Triple
+    Captain, Bench Boost, Free Hit and Wildcard, with reasoning (e.g. TC/BB on a
+    double, Free Hit on a blank).
+  - **Transfer plan** — weighs taking 0/1/2 transfers for the next GW, netting
+    5-GW projected gain against −4 hits given your free transfers, and
+    recommends the best option (per-slot upgrades; a combined multi-move
+    optimiser is Phase 4).
 
 ### Phase 4 — Optimisation & polish
 - Squad optimiser (best XI / best 15 under £100m and the 3-per-club limit) via
-  a linear/greedy solver in the browser.
+  a linear/greedy solver in the browser — and a combined multi-transfer optimiser
+  (jointly chosen moves, not one-per-slot).
 - Automated captaincy & transfer "what-if" simulation.
 - Notifications ahead of deadlines.
 

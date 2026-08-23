@@ -14,7 +14,7 @@ import os
 
 from model import Cumulative, League, fit_cs, project_points
 
-HORIZON = 5
+HORIZON = 6
 
 
 # ---- history loading --------------------------------------------------------
