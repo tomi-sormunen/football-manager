@@ -1,0 +1,26 @@
+{
+"model": {
+"n": 0,
+"mae": null,
+"rmse": null,
+"corr": null
+},
+"baseline_last": {
+"n": 0,
+"mae": null,
+"rmse": null,
+"corr": null
+},
+"baseline_ppg": {
+"n": 0,
+"mae": null,
+"rmse": null,
+"corr": null
+},
+"by_position": {},
+"seasons": {
+"history": {
+"gws_evaluated": []
+}
+}
+}
