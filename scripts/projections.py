@@ -12,9 +12,16 @@ import glob
 import json
 import os
 
-from model import Cumulative, League, fit_cs, project_points
+from model import Cumulative, League, clamp, fit_cs, project_points
 
 HORIZON = 6
+
+# Recency + form knobs (env-overridable so they can be A/B'd on the backtest).
+# Per-gameweek decay applied to a player's stats when building cumulatives:
+# 1.0 = every gameweek counts equally; <1 = recent gameweeks weigh more.
+RECENCY_DECAY = float(os.environ.get("FM_RECENCY_DECAY", "0.9"))
+# How many recent gameweeks feed a team's recent-form rating.
+FORM_RECENT_N = int(os.environ.get("FM_FORM_RECENT_N", "5"))
 
 
 # ---- history loading --------------------------------------------------------
@@ -40,32 +47,95 @@ def load_history(history_dir):
 from model import DEFCON_THRESHOLD
 
 
-def build_cumulative(history, upto_gw, pos_by_id):
-    """Accumulate each player's inputs from all history GWs < upto_gw."""
+def build_cumulative(history, upto_gw, pos_by_id, decay=None):
+    """Accumulate each player's inputs from all history GWs < upto_gw.
+
+    Rate inputs (xG, xA, bonus, DEFCON hits) are **recency-weighted**: a recent
+    gameweek counts `1/decay` times more than the one before it. To keep the
+    regression-to-mean honest, weights only reshape the *rate* — the effective
+    totals are rescaled back to the player's real minutes, so a hot player over
+    few games is still regressed by their true sample size. `decay=1.0`
+    reproduces the old equal-weight behaviour exactly.
+    """
+    if decay is None:
+        decay = RECENCY_DECAY
     cum = {}
-    gws = [g for g in history if g < upto_gw]
+    wacc = {}   # pid -> [w·minutes, w·xg, w·xa, w·bonus, w·defcon_hit]
+    gws = sorted(g for g in history if g < upto_gw)
     n_gw = len(gws)
+    latest = gws[-1] if gws else 0
     for gw in gws:
+        w = decay ** (latest - gw)
         for r in history[gw]:
             pid = r["id"]
             c = cum.get(pid)
             if c is None:
                 c = cum[pid] = Cumulative()
+                wacc[pid] = [0.0, 0.0, 0.0, 0.0, 0.0]
             mins = r.get("minutes", 0)
-            c.minutes += mins
-            c.xg += r.get("xg", 0.0)
-            c.xa += r.get("xa", 0.0)
-            c.bonus += r.get("bonus", 0)
+            c.minutes += mins                      # raw totals (real sample size)
             if mins > 0:
                 c.appearances += 1
+            c.recent_minutes.append(mins)
             pos = pos_by_id.get(pid, r.get("pos", "MID"))
             thr = DEFCON_THRESHOLD.get(pos, 12)
-            if r.get("defcon", 0) >= thr:
-                c.defcon_hits += 1
-            c.recent_minutes.append(mins)
-    for c in cum.values():
+            hit = 1.0 if r.get("defcon", 0) >= thr else 0.0
+            a = wacc[pid]
+            a[0] += w * mins
+            a[1] += w * r.get("xg", 0.0)
+            a[2] += w * r.get("xa", 0.0)
+            a[3] += w * r.get("bonus", 0)
+            a[4] += w * hit
+    for pid, c in cum.items():
         c.gws_elapsed = n_gw
+        wmin, wxg, wxa, wbonus, wdef = wacc[pid]
+        if wmin > 0 and c.minutes > 0:
+            scale = c.minutes / wmin               # rate → effective total on real minutes
+            c.xg = wxg * scale
+            c.xa = wxa * scale
+            c.bonus = wbonus * scale
+            c.defcon_hits = wdef * scale
     return cum
+
+
+def team_form(history, teams, recent_n=None):
+    """Recent attack/defence form per team as multipliers around 1.0.
+
+    Attack form = recent expected goals *for* per match vs the league average
+    (>1 = scoring more than average lately). Defence form = league-average goals
+    conceded / this team's recent goals conceded per match (>1 = meaner than
+    average lately). Returns ({}, {}) — neutral — when history is too thin.
+    """
+    if recent_n is None:
+        recent_n = FORM_RECENT_N
+    per = {}   # team -> {gw: (xg_for, goals_against)}
+    for gw, rows in history.items():
+        agg = {}
+        for r in rows:
+            t = r["team"]
+            a = agg.setdefault(t, [0.0, 0])
+            a[0] += r.get("xg", 0.0)
+            a[1] = max(a[1], r.get("gc", 0))       # team goals conceded that match
+        for t, (xgf, ga) in agg.items():
+            per.setdefault(t, {})[gw] = (xgf, ga)
+
+    att_raw, dfn_raw = {}, {}
+    for t, byg in per.items():
+        gws = sorted(byg)[-recent_n:]
+        if len(gws) < 2:                           # too few matches to trust
+            continue
+        att_raw[t] = sum(byg[g][0] for g in gws) / len(gws)
+        dfn_raw[t] = sum(byg[g][1] for g in gws) / len(gws)
+    if len(att_raw) < 6:                           # not enough teams with data
+        return {}, {}
+
+    avg_att = sum(att_raw.values()) / len(att_raw) or 1.0
+    avg_ga = sum(dfn_raw.values()) / len(dfn_raw) or 1.0
+    att_form, dfn_form = {}, {}
+    for t in att_raw:
+        att_form[t] = clamp(att_raw[t] / avg_att, 0.6, 1.6)
+        dfn_form[t] = clamp(avg_ga / max(dfn_raw[t], 0.3), 0.6, 1.6)
+    return att_form, dfn_form
 
 
 def cumulative_from_season(players, current_gw):
@@ -104,6 +174,7 @@ def league_from(teams, history=None):
                 gap = (d - a) / scale
                 samples.append((gap, r.get("home", True), r.get("gc", 1) == 0))
         fit_cs(league, samples)
+        league.att_form, league.dfn_form = team_form(history, teams)
     return league
 
 
@@ -167,6 +238,7 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON):
             "sum": total5,
             "by_gw": [{"gw": x["gw"], "exp": x["exp"]} for x in by_gw],
         }
+    from model import FORM_WEIGHT, CS_FORM_WEIGHT
     return {
         "meta": {
             "model": "xpts-v1",
@@ -176,6 +248,8 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON):
             "cs_coeffs": {"bias": round(league.cs_bias, 3),
                           "slope": round(league.cs_slope, 3),
                           "home": round(league.cs_home, 3)},
+            "form": {"recency_decay": RECENCY_DECAY, "att_weight": FORM_WEIGHT,
+                     "cs_weight": CS_FORM_WEIGHT, "teams_rated": len(league.att_form)},
         },
         "players": result,
     }

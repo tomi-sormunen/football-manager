@@ -51,6 +51,21 @@ Key ideas:
    apply until there's enough data.
 5. **DEFCON (2025/26).** Modelled as an empirical hit-rate × 2 points, so
    ball-winning defenders and CDMs are valued correctly.
+6. **Recent form.** Two gentle, tunable nudges on top of the above:
+   - *Player recency* — when building a player's cumulative stats, recent
+     gameweeks weigh more (`RECENCY_DECAY`, default 0.9). Crucially this only
+     reshapes the *rate*; the effective totals are rescaled back to the player's
+     real minutes, so regression-to-mean still uses their true sample size.
+   - *Team form* — each club gets a recent attack rating (expected goals *for*
+     per match vs league average) and defence rating (goals conceded vs average)
+     from the last few gameweeks. These multiply the opponent adjustment
+     (`FORM_WEIGHT`) and shift clean-sheet probability (`CS_FORM_WEIGHT`), so an
+     in-form attack / leaky defence moves projections — on top of FPL's static
+     strength ratings, which already price in much of the season-long picture.
+
+   All three weights are env-overridable (`FM_RECENCY_DECAY`, `FM_FORM_WEIGHT`,
+   `FM_CS_FORM_WEIGHT`) and recorded in `projections.json`'s `meta.form`. Setting
+   them to `1.0 / 0 / 0` reproduces the pre-form model exactly.
 
 Every term is returned in the `parts` breakdown, which is what the Captains view
 draws as bars — so you can always see *why* a player is projected where they are.
@@ -90,6 +105,25 @@ per-gameweek FPL scoring is inherently noisy (hauls and blanks), so a
 correlation around 0.38 is a solid result rather than a low one — the point is
 the consistent edge over guessing, sustained across two full seasons and every
 position (MID best at MAE 1.57, DEF hardest at 1.99).
+
+#### On the recent-form weighting
+
+The form/recency nudges were tuned on the **2024-25 + 2025-26** backfill
+(30,621 samples). The honest finding: their effect is **small and mixed** —
+because FPL's own team ratings already price in much of a team's form.
+
+| Config | MAE ↓ | RMSE ↓ | Correlation ↑ |
+|---|---|---|---|
+| no form (`1.0 / 0 / 0`) | **1.804** | **2.609** | 0.399 |
+| **shipped** (`decay 0.9 / att 0.2 / cs 0.4`) | 1.810 | 2.613 | **0.402** |
+
+Recency alone is essentially neutral; team-form weighting buys a small
+**ranking-correlation** gain (0.399 → 0.402) at a tiny cost in absolute error.
+For a tool whose job is to *rank* transfer and captain options, correlation is
+the more decision-relevant metric, so the gentle defaults are shipped — but they
+are deliberately mild and one env var away from off. Dialling them harder
+(e.g. `att 0.35 / cs 0.8`) raised correlation no further and hurt MAE more, so
+they're kept restrained.
 
 Reproduce it:
 
