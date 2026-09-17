@@ -25,6 +25,7 @@ improved over time behind this same interface.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 
 # ---- scoring (kept in sync with docs/RULES.md; overridable via meta.scoring) -
@@ -49,6 +50,14 @@ K_DEFCON = 5.0
 BONUS90_PRIOR = 0.25
 K_BONUS = 6.0
 
+# ---- recent-form weighting (env-overridable so it can be A/B'd on the backtest)
+# How strongly a team's *recent* attack/defence form nudges the opponent
+# adjustment (0 = ignore form, use static FPL ratings only; ~0.35 = a modest
+# nudge). Applied multiplicatively around 1.0.
+FORM_WEIGHT = float(os.environ.get("FM_FORM_WEIGHT", "0.2"))
+# How strongly recent form shifts clean-sheet probability (in log-odds).
+CS_FORM_WEIGHT = float(os.environ.get("FM_CS_FORM_WEIGHT", "0.4"))
+
 
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
@@ -68,6 +77,10 @@ class League:
     cs_bias: float = -0.10     # logistic intercept
     cs_slope: float = 1.15     # logistic slope on normalised strength gap
     cs_home: float = 0.35      # home-advantage bump (log-odds)
+    # Recent-form multipliers per team (~1.0 = league-average form). Populated
+    # from history by projections.league_from(); empty => neutral (static only).
+    att_form: dict = field(default_factory=dict)   # >1 = scoring above average lately
+    dfn_form: dict = field(default_factory=dict)   # >1 = conceding below average lately
 
     @classmethod
     def from_teams(cls, teams):
@@ -146,21 +159,34 @@ def fit_cs(league: League, samples):
 
 
 def cs_probability(league: League, team_id, opp_id, home: bool):
-    """P(clean sheet) for `team_id` vs `opp_id`, from the strength gap."""
+    """P(clean sheet) for `team_id` vs `opp_id`, from the strength gap, nudged by
+    recent form (our defence in good form ↑, opponent attack in form ↓)."""
     d = league.dfn.get(team_id, league.avg_dfn)
     a = league.att.get(opp_id, league.avg_att)
     scale = (league.avg_dfn + league.avg_att) / 2 or 1.0
     gap = (d - a) / scale                     # >0 => our defence outweighs their attack
     z = league.cs_bias + league.cs_slope * gap + league.cs_home * (1 if home else 0)
+    team_dform = league.dfn_form.get(team_id, 1.0)   # >1 = solid lately
+    opp_aform = league.att_form.get(opp_id, 1.0)     # >1 = dangerous lately
+    z += CS_FORM_WEIGHT * ((team_dform - 1.0) - (opp_aform - 1.0))
     return clamp(sigmoid(z), 0.02, 0.85)
 
 
-def _attack_multiplier(league: League, opp_id, home: bool):
-    """Scale attacking output by how leaky the opponent is + home advantage."""
+def _blend_form(x):
+    """Blend a form multiplier `x` (around 1.0) toward neutral by FORM_WEIGHT."""
+    return (1.0 - FORM_WEIGHT) + FORM_WEIGHT * x
+
+
+def _attack_multiplier(league: League, team_id, opp_id, home: bool):
+    """Scale attacking output by how leaky the opponent is + home advantage,
+    then nudge by recent form (opponent defence out of form ↑, our attack hot ↑)."""
     opp_def = league.dfn.get(opp_id, league.avg_dfn)
     mult = league.avg_dfn / opp_def if opp_def else 1.0   # weak defence => >1
     mult *= 1.08 if home else 0.94
-    return clamp(mult, 0.6, 1.6)
+    opp_dform = league.dfn_form.get(opp_id, 1.0)          # >1 = opp defence solid lately
+    team_aform = league.att_form.get(team_id, 1.0)        # >1 = our attack hot lately
+    mult *= _blend_form(1.0 / opp_dform if opp_dform else 1.0) * _blend_form(team_aform)
+    return clamp(mult, 0.55, 1.8)
 
 
 def project_points(cum: Cumulative, pos: str, team_id, opp_id, home: bool,
@@ -176,7 +202,7 @@ def project_points(cum: Cumulative, pos: str, team_id, opp_id, home: bool,
     # Attacking returns from regressed per-90 rates, opponent-adjusted.
     xg90 = _rate90(cum.xg, cum.minutes, XG90_PRIOR.get(pos, 0.1), K_RATE)
     xa90 = _rate90(cum.xa, cum.minutes, XA90_PRIOR.get(pos, 0.1), K_RATE)
-    amult = _attack_multiplier(league, opp_id, home)
+    amult = _attack_multiplier(league, team_id, opp_id, home)
     exp_goals = xg90 * nineties * amult * p_play
     exp_assists = xa90 * nineties * amult * p_play
     attack = exp_goals * GOAL_PTS.get(pos, 4) + exp_assists * 3

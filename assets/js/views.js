@@ -111,10 +111,13 @@ function note(text) { return h('p', { class: 'muted small' }, text); }
 // One-line description of which projection is powering the numbers.
 function projectionBlurb(bundle) {
   const m = bundle.projections?.meta;
-  return m
-    ? `Projections use the ${m.model} expected-points model, fitted on ${m.history_gws} ` +
-      'gameweeks of history (opponent-adjusted; see docs/MODEL.md).'
-    : 'Projections use a transparent client-side heuristic (see docs/FEATURES.md).';
+  if (!m) return 'Projections use a transparent client-side heuristic (see docs/FEATURES.md).';
+  if (m.model === 'xpts-v2') {
+    return 'Projections use the xpts-v2 gradient-boosted model (trained on past ' +
+      'seasons, stacked on the opponent-adjusted xpts-v1 features; see docs/MODEL.md).';
+  }
+  return `Projections use the ${m.model} expected-points model, fitted on ${m.history_gws} ` +
+    'gameweeks of history (opponent-adjusted; see docs/MODEL.md).';
 }
 
 // ---- Dashboard --------------------------------------------------------------
@@ -161,9 +164,20 @@ export function dashboard(bundle) {
       'to populate live prices, form and fixtures.'));
   }
 
-  // Model validation, if a backtest report is present.
+  // Model validation. Prefer the gradient-boosted model's held-out comparison
+  // against v1 (embedded in the projections meta); else the v1 backtest report.
+  const v2val = model?.v2?.validation;
   const bt = bundle.backtest;
-  if (bt && bt.model && bt.model.mae != null) {
+  if (v2val && v2val.v2 && v2val.v1) {
+    wrap.appendChild(h('div', { class: 'banner ok' }, [
+      h('strong', {}, `${model.model} validated: `),
+      `MAE ${v2val.v2.mae} vs ${v2val.v1.mae} for v1 (−`
+      + `${Math.round((1 - v2val.v2.mae / v2val.v1.mae) * 100)}%), `
+      + `correlation ${v2val.v2.corr} vs ${v2val.v1.corr}`,
+      h('span', { class: 'muted small' }, ` — held-out season ${v2val.season}, `
+        + `${v2val.v2.n.toLocaleString()} player-GW samples`),
+    ]));
+  } else if (bt && bt.model && bt.model.mae != null) {
     const seasons = bt.seasons ? Object.keys(bt.seasons).join(', ') : '';
     wrap.appendChild(h('div', { class: 'banner ok' }, [
       h('strong', {}, `Model validated: `),

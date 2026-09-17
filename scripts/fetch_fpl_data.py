@@ -178,10 +178,17 @@ def main(argv=None):
 
     # Build model projections from any accumulated history (falls back to
     # current-season totals when history is thin). Run build_history.py first
-    # in CI so this has the richest history to work with.
+    # in CI so this has the richest history to work with. If a trained
+    # gradient-boosted model is committed, it sets the headline projection.
+    import gbm
     history = load_history(os.path.join(args.out, "history"))
-    projections = project_all(players, teams, fixtures, meta, history)
+    model_v2 = gbm.load_model(os.path.join(args.out, "model_v2.json"))
+    projections = project_all(players, teams, fixtures, meta, history,
+                              model_v2=model_v2)
     write_projections(args.out, projections)
+    if model_v2:
+        print(f"Projections use {model_v2.get('model')} "
+              f"(trained on {model_v2.get('trained_on')}).")
     return 0
 
 
