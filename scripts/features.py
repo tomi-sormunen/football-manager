@@ -26,15 +26,34 @@ FEATURES = [
     "att_form_team", "dfn_form_team", "att_form_opp", "dfn_form_opp",  # recent form
     "recent_pts_1", "recent_pts_3", "season_ppg",        # the player's own scoring
     "minutes", "appearances", "gws_elapsed",             # sample size / reliability
+    "pen_taker", "sp_taker",                             # set-piece / penalty duty
+    "price_mom", "net_churn",                            # market: price & transfers
 ]
 
+_NO_MARKET = {"pen": 0, "spo": 0, "price_mom": 0.0, "churn": 0.0}
 
-def feature_vector(cum, pos, team, opp, home, league, recent):
-    """Build one ordered feature vector. `recent` = {last1, last3, ppg}."""
+
+def _duty(order):
+    """Set-piece/penalty order → 1 (primary), 0.5 (backup), 0 (none)."""
+    if order == 1:
+        return 1.0
+    if 1 < order <= 3:
+        return 0.5
+    return 0.0
+
+
+def feature_vector(cum, pos, team, opp, home, league, recent, extra=None):
+    """Build one ordered feature vector. `recent` = {last1, last3, ppg};
+    `extra` = {pen, spo, price_mom, churn} (set-piece duties + market signals)."""
     proj = project_points(cum, pos, team, opp, home, league, "a")
     d, parts = proj["detail"], proj["parts"]
     avg_att = league.avg_att or 1.0
     avg_dfn = league.avg_dfn or 1.0
+    ex = extra or _NO_MARKET
+
+    def clamp(x, lo, hi):
+        return max(lo, min(hi, x))
+
     row = {
         "v1_exp": proj["exp"],
         "appearance": parts["appearance"], "attack": parts["attack"],
@@ -57,6 +76,12 @@ def feature_vector(cum, pos, team, opp, home, league, recent):
         "season_ppg": recent["ppg"],
         "minutes": cum.minutes, "appearances": cum.appearances,
         "gws_elapsed": cum.gws_elapsed,
+        "pen_taker": _duty(ex.get("pen", 0)),
+        "sp_taker": _duty(ex.get("spo", 0)),
+        # realized recent price move (0.1m units) and net-transfer churn as a
+        # share of owners — both normalised the same way in training and serving.
+        "price_mom": clamp(ex.get("price_mom", 0.0), -5, 5) / 5.0,
+        "net_churn": clamp(ex.get("churn", 0.0), -0.5, 0.5) * 2.0,
     }
     return [row[f] for f in FEATURES], proj
 
@@ -78,6 +103,33 @@ def recent_points_maps(history, upto_gw):
     return out
 
 
+def recent_market_maps(history, upto_gw):
+    """Per-player set-piece duty and market momentum as of `upto_gw`:
+    latest known penalty/set-piece order, realized price move over the last
+    gameweek (0.1m units), and net-transfer churn as a share of owners."""
+    seq = {}   # pid -> ordered list of rows (with market fields)
+    for gw in sorted(g for g in history if g < upto_gw):
+        for r in history[gw]:
+            seq.setdefault(r["id"], []).append(r)
+    out = {}
+    for pid, rows in seq.items():
+        last = rows[-1]
+        pen = spo = 0
+        for r in reversed(rows):                    # latest non-zero duty
+            if r.get("pen", 0) and not pen:
+                pen = r["pen"]
+            if r.get("spo", 0) and not spo:
+                spo = r["spo"]
+            if pen and spo:
+                break
+        price_mom = 0.0
+        if len(rows) >= 2:
+            price_mom = last.get("value", 0) - rows[-2].get("value", 0)
+        churn = last.get("tb", 0) / max(1, last.get("sel", 0)) if last.get("sel") else 0.0
+        out[pid] = {"pen": pen, "spo": spo, "price_mom": price_mom, "churn": churn}
+    return out
+
+
 def build_examples(history, teams, league_from, build_cumulative,
                    min_gw=4, min_prior_mins=45):
     """Replay one season's history → (X, y, groups). `groups` is the GW of each
@@ -96,6 +148,7 @@ def build_examples(history, teams, league_from, build_cumulative,
         league = league_from(teams, {g: history[g] for g in gws if g < t})
         cum = build_cumulative(history, t, pos_by_id)
         recent = recent_points_maps(history, t)
+        market = recent_market_maps(history, t)
         for r in history[t]:
             pid = r["id"]
             c = cum.get(pid)
@@ -104,7 +157,8 @@ def build_examples(history, teams, league_from, build_cumulative,
             pos = pos_by_id.get(pid, "MID")
             rec = recent.get(pid, {"last1": 0.0, "last3": 0.0, "ppg": 0.0})
             vec, _ = feature_vector(c, pos, r["team"], r["opp"],
-                                    r.get("home", True), league, rec)
+                                    r.get("home", True), league, rec,
+                                    market.get(pid, _NO_MARKET))
             X.append(vec)
             y.append(r.get("pts", 0))
             groups.append(t)

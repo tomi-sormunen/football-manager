@@ -232,10 +232,19 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON,
 
     fixtures_by_team = upcoming_by_team(fixtures, next_gw, horizon)
     default_rec = {"last1": 0.0, "last3": 0.0, "ppg": 0.0}
+    total_players = meta.get("total_players", 0)
+
+    def market_extra(p):
+        owners = (p.get("sel", 0) / 100.0) * total_players if total_players else 0
+        churn = ((p.get("transfers_in_event", 0) - p.get("transfers_out_event", 0))
+                 / owners) if owners else 0.0
+        return {"pen": p.get("pen", 0), "spo": p.get("spo", 0),
+                "price_mom": p.get("cost_change_event", 0), "churn": churn}
 
     def project_fixture(p, c, opp, home):
         rec = recent.get(p["id"], default_rec)
-        vec, proj = feature_vector(c, p["pos"], p["team"], opp, home, league, rec)
+        vec, proj = feature_vector(c, p["pos"], p["team"], opp, home, league, rec,
+                                   market_extra(p))
         if model_v2:
             v2 = max(0.0, gbm.predict(model_v2, vec))
             v1 = proj["exp"] or 0.01
