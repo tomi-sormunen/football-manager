@@ -1,9 +1,23 @@
-# Expected-points model (`xpts-v1`)
+# Expected-points model
 
-The projections behind captaincy, transfers, value and differentials come from a
-transparent, opponent-adjusted **expected-points model**. It's deliberately
-inspectable rather than a black box, and it's validated by a backtest so we can
-tell whether it actually beats naive guessing.
+Projections behind captaincy, transfers, value and differentials come from an
+**expected-points model**. There are two, and the live projection uses the
+better one when it's available:
+
+- **`xpts-v1`** — a transparent, opponent-adjusted hand-built model
+  ([`project_points`](../scripts/model.py)). Fully inspectable; the fallback.
+- **`xpts-v2`** — a **gradient-boosted** model that *stacks on v1* (its features
+  are v1's own components plus recent-form signals) and is trained on past
+  seasons. It sets the headline number when [`data/model_v2.json`](../data/model_v2.json)
+  is present; v1's parts are kept for the breakdown, rescaled to the v2 total.
+  See [The gradient-boosted model](#the-gradient-boosted-model-xpts-v2).
+
+Both are **backtested** so we can tell they actually beat naive guessing, and
+`meta.model` in `projections.json` records which one produced the numbers.
+
+## `xpts-v1` — the transparent base
+
+`xpts-v1` is deliberately inspectable rather than a black box.
 
 The whole model is one function — [`project_points`](../scripts/model.py) —
 which takes a player's accumulated stats "as of now", their position and the
@@ -137,6 +151,46 @@ validated" banner reads. The raw per-gameweek snapshots are large and
 regenerable, so they're git-ignored; only the small report is committed. The
 sample dataset also ships **synthetic** history so the pipeline runs with no
 network at all — those numbers only prove the machinery, not accuracy.
+
+## The gradient-boosted model (`xpts-v2`)
+
+`xpts-v2` is a scikit-learn `GradientBoostingRegressor` that **stacks on v1**:
+its features are v1's own explainable components (`v1_exp`, the appearance /
+attack / clean-sheet / DEFCON / bonus parts, and the `xg90 / p_cs / hit_rate …`
+detail) plus a handful of raw signals (position, home/away, opponent & own
+strength, recent team form, and the player's own last-1 / last-3 / season
+points). Full list in [`scripts/features.py`](../scripts/features.py). Because it
+builds on v1, it can only *refine* what v1 computes — reweighting components and
+finding interactions the linear hand-built model misses.
+
+**Trained offline, scored dependency-free.** Training
+([`scripts/train_model.py`](../scripts/train_model.py)) needs scikit-learn and
+runs in the *"Backfill history, backtest & train"* workflow. It exports the
+trees to a portable ~70 KB JSON ([`data/model_v2.json`](../data/model_v2.json)),
+which the live pipeline scores with a tiny pure-Python evaluator
+([`scripts/gbm.py`](../scripts/gbm.py)) — so *"Update data & deploy to Pages"*
+needs **no** ML libraries. The pure-Python scorer matches scikit-learn to ~1e-5.
+
+**Leakage-free validation.** Training holds out the most recent season, trains
+on the rest, and compares v2 to v1 on that unseen season. Over four seasons
+(2022-23 … 2025-26), held out on **2025-26** (15,110 player-GW samples):
+
+| Model | MAE ↓ | RMSE ↓ | Correlation ↑ |
+|---|---|---|---|
+| `xpts-v1` | 1.887 | 2.691 | 0.390 |
+| **`xpts-v2`** | **1.703** | **2.574** | **0.421** |
+
+v2 cuts MAE ~**10%** and lifts correlation on a season it never saw — a real,
+broad improvement (unlike the recent-form nudge, which was marginal). These
+numbers are embedded in `projections.json` → `meta.v2.validation` and shown in
+the dashboard's "Model validated" banner. The shipped model is then retrained on
+**all** seasons for maximum data.
+
+Reproduce / retrain:
+```bash
+python scripts/backfill_history.py --seasons 2022-23,2023-24,2024-25,2025-26 --out data/backfill
+python scripts/train_model.py --history data/backfill --out data/model_v2.json
+```
 
 ## Limitations & next steps
 

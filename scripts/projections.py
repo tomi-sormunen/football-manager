@@ -193,7 +193,17 @@ def upcoming_by_team(fixtures, from_gw, horizon):
 
 # ---- main projection --------------------------------------------------------
 
-def project_all(players, teams, fixtures, meta, history, horizon=HORIZON):
+def project_all(players, teams, fixtures, meta, history, horizon=HORIZON,
+                model_v2=None):
+    """Project points for the next `horizon` gameweeks.
+
+    If `model_v2` (a loaded gbm model dict) is given, the gradient-boosted model
+    sets the headline number; v1's parts are kept for the breakdown, scaled to
+    the v2 total so they stay consistent. Without it, pure v1 is used.
+    """
+    import gbm
+    from features import feature_vector, recent_points_maps
+
     next_gw = meta["next_gw"]
     pos_by_id = {p["id"]: p["pos"] for p in players}
     status_by_id = {p["id"]: p.get("status", "a") for p in players}
@@ -213,10 +223,26 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON):
     league = league_from(teams, history)
     if history:
         cum = build_cumulative(history, next_gw, pos_by_id)
+        recent = recent_points_maps(history, next_gw)
     else:
         cum = cumulative_from_season(players, meta["current_gw"])
+        # season fallback: approximate recent scoring from players.json
+        recent = {p["id"]: {"last1": p.get("form", 0.0), "last3": p.get("form", 0.0),
+                            "ppg": p.get("ppg", 0.0)} for p in players}
 
     fixtures_by_team = upcoming_by_team(fixtures, next_gw, horizon)
+    default_rec = {"last1": 0.0, "last3": 0.0, "ppg": 0.0}
+
+    def project_fixture(p, c, opp, home):
+        rec = recent.get(p["id"], default_rec)
+        vec, proj = feature_vector(c, p["pos"], p["team"], opp, home, league, rec)
+        if model_v2:
+            v2 = max(0.0, gbm.predict(model_v2, vec))
+            v1 = proj["exp"] or 0.01
+            scale = v2 / v1                      # keep v1 parts, rescale to v2 total
+            proj["parts"] = {k: round(val * scale, 2) for k, val in proj["parts"].items()}
+            proj["exp"] = round(v2, 2)
+        return proj
 
     result = {}
     for p in players:
@@ -224,11 +250,8 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON):
         c = cum.get(pid) or Cumulative()
         by_gw = []
         for (gw, opp, home) in fixtures_by_team.get(p["team"], []):
-            proj = project_points(c, p["pos"], p["team"], opp, home, league,
-                                  status_by_id.get(pid, "a"))
-            proj["gw"] = gw
-            proj["opp"] = opp
-            proj["home"] = home
+            proj = project_fixture(p, c, opp, home)
+            proj["gw"], proj["opp"], proj["home"] = gw, opp, home
             by_gw.append(proj)
         total5 = round(sum(x["exp"] for x in by_gw), 2)
         result[pid] = {
@@ -241,7 +264,7 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON):
     from model import FORM_WEIGHT, CS_FORM_WEIGHT
     return {
         "meta": {
-            "model": "xpts-v1",
+            "model": model_v2.get("model", "xpts-v2") if model_v2 else "xpts-v1",
             "horizon": horizon,
             "from_gw": next_gw,
             "history_gws": len(history) if history else 0,
@@ -250,6 +273,8 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON):
                           "home": round(league.cs_home, 3)},
             "form": {"recency_decay": RECENCY_DECAY, "att_weight": FORM_WEIGHT,
                      "cs_weight": CS_FORM_WEIGHT, "teams_rated": len(league.att_form)},
+            "v2": {"trained_on": model_v2.get("trained_on"),
+                   "validation": model_v2.get("validation")} if model_v2 else None,
         },
         "players": result,
     }

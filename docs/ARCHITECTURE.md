@@ -56,6 +56,7 @@ football-manager/
 │   ├── players.json        # slim per-player rows (see schema below)
 │   ├── fixtures.json       # fixtures with per-side FDR
 │   ├── projections.json    # expected-points model output (per player)
+│   ├── model_v2.json       # trained gradient-boosted model (portable JSON)
 │   ├── backtest.json       # model accuracy vs baselines
 │   ├── entry.json          # the manager's squad (My Team)
 │   └── history/gwNN.json   # per-gameweek snapshots (training/backtest set)
@@ -64,7 +65,10 @@ football-manager/
 │   ├── fetch_fpl_data.py   # FPL API → data/*.json + projections (in the Action)
 │   ├── fetch_entry.py      # a manager's squad → data/entry.json (in the Action)
 │   ├── build_history.py    # snapshot finished GWs → data/history/
-│   ├── model.py            # project_points(): the expected-points model
+│   ├── model.py            # project_points(): the xpts-v1 model
+│   ├── features.py         # feature extraction for xpts-v2 (stacks on v1)
+│   ├── train_model.py      # train xpts-v2 (sklearn) → data/model_v2.json
+│   ├── gbm.py              # portable, dependency-free scorer for model_v2.json
 │   ├── projections.py      # history + model → projections.json
 │   ├── backtest.py         # replay past GWs, report accuracy
 │   └── make_sample_data.py # schema-matching sample dataset (+ synthetic history)

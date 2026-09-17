@@ -1,19 +1,25 @@
-name: Backfill history & backtest
+name: Backfill history, backtest & train
 
-# Manually backfill one or more past seasons from the open community FPL dataset
-# (vaastav/Fantasy-Premier-League), run the backtest, and commit the small
-# accuracy report (data/backfill/backtest.json). The raw per-gameweek snapshots
-# are regenerable and git-ignored, so only the result is committed.
+# Manually backfill past seasons from the open community FPL dataset
+# (vaastav/Fantasy-Premier-League), run the backtest, (re)train the gradient-
+# boosted model (xpts-v2), and commit the small results: the accuracy report
+# (data/backfill/backtest.json) and the portable model (data/model_v2.json).
+# The raw per-gameweek snapshots are regenerable and git-ignored.
 #
-# Run it from the Actions tab → "Backfill history & backtest" → Run workflow.
+# The live "Update data & deploy to Pages" workflow needs no ML libraries — it
+# just scores the committed model_v2.json with a pure-Python evaluator. Rerun
+# this workflow occasionally (e.g. once a season, or to add a new season) to
+# refresh the model.
+#
+# Run it from the Actions tab → "Backfill history, backtest & train".
 
 on:
   workflow_dispatch:
     inputs:
       seasons:
-        description: 'Comma-separated seasons (e.g. 2021-22,2022-23,2023-24)'
+        description: 'Comma-separated seasons to train/backtest on (>=2)'
         required: true
-        default: '2022-23,2023-24'
+        default: '2022-23,2023-24,2024-25,2025-26'
 
 permissions:
   contents: write
@@ -37,14 +43,19 @@ jobs:
       - name: Backtest across backfilled seasons
         run: python scripts/backtest.py --history data/backfill --out data/backfill/backtest.json
 
-      - name: Commit backtest result
+      - name: Train gradient-boosted model (xpts-v2)
+        run: |
+          pip install --quiet scikit-learn
+          python scripts/train_model.py --history data/backfill --out data/model_v2.json
+
+      - name: Commit results
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- data/backfill/backtest.json; then
-            git add data/backfill/backtest.json
-            git commit -m "chore(backtest): refresh backfilled backtest report [skip ci]"
+          git add data/backfill/backtest.json data/model_v2.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(model): refresh backtest report & xpts-v2 model [skip ci]"
             git push
           else
-            echo "No change in backtest report."
+            echo "No changes to commit."
           fi
