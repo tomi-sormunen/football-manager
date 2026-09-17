@@ -157,11 +157,20 @@ network at all — those numbers only prove the machinery, not accuracy.
 `xpts-v2` is a scikit-learn `GradientBoostingRegressor` that **stacks on v1**:
 its features are v1's own explainable components (`v1_exp`, the appearance /
 attack / clean-sheet / DEFCON / bonus parts, and the `xg90 / p_cs / hit_rate …`
-detail) plus a handful of raw signals (position, home/away, opponent & own
-strength, recent team form, and the player's own last-1 / last-3 / season
-points). Full list in [`scripts/features.py`](../scripts/features.py). Because it
-builds on v1, it can only *refine* what v1 computes — reweighting components and
-finding interactions the linear hand-built model misses.
+detail) plus raw signals: position, home/away, opponent & own strength, recent
+team form, the player's own last-1 / last-3 / season points, **set-piece &
+penalty duties**, and **transfer-market momentum** (net transfers as a share of
+owners, and realized recent price move). Full list in
+[`scripts/features.py`](../scripts/features.py). Because it builds on v1, it can
+only *refine* what v1 computes — reweighting components and finding interactions
+the linear hand-built model misses.
+
+The strongest features are v1's own outputs (`v1_exp`, appearance, bonus,
+attack) — as expected for a stacked model. Of the added signals, **net transfer
+churn** (~0.023 importance, a top-10 feature) and **penalty duty** (~0.020) pull
+real weight; set-piece duty is modest (~0.011); realized price change is
+negligible (~0.0001) — the market's *transfer* momentum is the useful "price"
+signal, not the lagging realized move.
 
 **Trained offline, scored dependency-free.** Training
 ([`scripts/train_model.py`](../scripts/train_model.py)) needs scikit-learn and
@@ -178,7 +187,7 @@ on the rest, and compares v2 to v1 on that unseen season. Over four seasons
 | Model | MAE ↓ | RMSE ↓ | Correlation ↑ |
 |---|---|---|---|
 | `xpts-v1` | 1.887 | 2.691 | 0.390 |
-| **`xpts-v2`** | **1.703** | **2.574** | **0.421** |
+| **`xpts-v2`** | **1.690** | **2.564** | **0.429** |
 
 v2 cuts MAE ~**10%** and lifts correlation on a season it never saw — a real,
 broad improvement (unlike the recent-form nudge, which was marginal). These

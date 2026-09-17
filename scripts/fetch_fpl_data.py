@@ -102,6 +102,9 @@ def transform(bootstrap: dict, fixtures_raw: list):
             "cost_change_event": _i(e.get("cost_change_event")),
             "transfers_in_event": _i(e.get("transfers_in_event")),
             "transfers_out_event": _i(e.get("transfers_out_event")),
+            # set-piece / penalty duties (for the xpts-v2 model)
+            "pen": _i(e.get("penalties_order")),
+            "spo": _sp_order(e),
         })
 
     fixtures = []
@@ -146,8 +149,19 @@ def transform(bootstrap: dict, fixtures_raw: list):
         "next_gw": next_gw,
         "next_deadline_utc": next_deadline,
         "scoring": scoring,
+        # total managers, for normalising transfer churn in the model
+        "total_players": _i(bootstrap.get("total_players")),
     }
     return meta, teams, players, fixtures
+
+
+def _sp_order(e):
+    """Best (lowest) set-piece order across corners/indirect and direct FKs;
+    0 = no set-piece duty."""
+    orders = [_i(e.get("corners_and_indirect_freekicks_order")),
+              _i(e.get("direct_freekicks_order"))]
+    orders = [o for o in orders if o > 0]
+    return min(orders) if orders else 0
 
 
 def _guess_season(events):
