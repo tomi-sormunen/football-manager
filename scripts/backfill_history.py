@@ -61,6 +61,15 @@ def _f(v, d=0.0):
         return d
 
 
+def _sp_order(p):
+    """Best (lowest) set-piece order across corners/indirect and direct FKs.
+    0 means no set-piece duty."""
+    orders = [_i(p.get("corners_and_indirect_freekicks_order")),
+              _i(p.get("direct_freekicks_order"))]
+    orders = [o for o in orders if o > 0]
+    return min(orders) if orders else 0
+
+
 def build_teams(teams_csv):
     teams, name_to_id = [], {}
     for t in teams_csv:
@@ -87,6 +96,10 @@ def backfill_season(season, out_dir):
     team_by_element = {_i(p["id"]): _i(p["team"]) for p in players_csv}
     type_by_element = {_i(p["id"]): ELEMENT_TYPE.get(str(p["element_type"]), "MID")
                        for p in players_csv}
+    # Set-piece / penalty duties (season-level snapshot from players_raw). 0 = none.
+    pen_by_element = {_i(p["id"]): _i(p.get("penalties_order"))
+                      for p in players_csv}
+    spo_by_element = {_i(p["id"]): _sp_order(p) for p in players_csv}
 
     by_gw = {}
     for r in merged:
@@ -109,6 +122,12 @@ def backfill_season(season, out_dir):
             "bonus": _i(r.get("bonus")),
             "gc": _i(r.get("goals_conceded")),
             "pts": _i(r.get("total_points")),
+            # set-piece duties (season-constant) + per-GW market signals
+            "pen": pen_by_element.get(pid, 0),
+            "spo": spo_by_element.get(pid, 0),
+            "value": _i(r.get("value")),                     # price, 0.1m units
+            "tb": _i(r.get("transfers_balance")),            # net transfers that GW
+            "sel": _i(r.get("selected")),                    # owners that GW
         })
 
     season_dir = os.path.join(out_dir, season)

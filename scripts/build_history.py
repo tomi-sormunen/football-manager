@@ -36,6 +36,13 @@ def _f(v, d=0.0):
         return d
 
 
+def _i(v, d=0):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return d
+
+
 def team_opponents(fixtures, gw):
     """team_id -> (opp_id, is_home) for a gameweek (first fixture if a DGW)."""
     m = {}
@@ -50,6 +57,8 @@ def team_opponents(fixtures, gw):
 def snapshot_gw(gw, live, bootstrap, fixtures):
     pos = {e["id"]: POS_MAP.get(e["element_type"], "MID") for e in bootstrap["elements"]}
     team = {e["id"]: e["team"] for e in bootstrap["elements"]}
+    pen = {e["id"]: _i(e.get("penalties_order")) for e in bootstrap["elements"]}
+    spo = {e["id"]: _sp_order(e) for e in bootstrap["elements"]}
     opp = team_opponents(fixtures, gw)
     rows = []
     for el in live["elements"]:
@@ -70,8 +79,21 @@ def snapshot_gw(gw, live, bootstrap, fixtures):
             "bonus": int(s.get("bonus", 0)),
             "gc": int(s.get("goals_conceded", 0)),
             "pts": int(s.get("total_points", 0)),
+            # set-piece duties (stable) + per-GW market signals, when present
+            "pen": pen.get(pid, 0),
+            "spo": spo.get(pid, 0),
+            "value": _i(s.get("value")),
+            "tb": _i(s.get("transfers_balance")),
+            "sel": _i(s.get("selected")),
         })
     return rows
+
+
+def _sp_order(e):
+    orders = [_i(e.get("corners_and_indirect_freekicks_order")),
+              _i(e.get("direct_freekicks_order"))]
+    orders = [o for o in orders if o > 0]
+    return min(orders) if orders else 0
 
 
 def main(argv=None):
