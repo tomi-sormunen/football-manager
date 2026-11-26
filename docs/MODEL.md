@@ -10,7 +10,8 @@ better one when it's available:
   are v1's own components plus recent-form signals) and is trained on past
   seasons. It sets the headline number when [`data/model_v2.json`](../data/model_v2.json)
   is present; v1's parts are kept for the breakdown, rescaled to the v2 total.
-  See [The gradient-boosted model](#the-gradient-boosted-model-xpts-v2).
+  It also ships **quantile models** for a floor–ceiling (p10–p90) band around
+  each projection. See [The gradient-boosted model](#the-gradient-boosted-model-xpts-v2).
 
 Both are **backtested** so we can tell they actually beat naive guessing, and
 `meta.model` in `projections.json` records which one produced the numbers.
@@ -201,9 +202,44 @@ python scripts/backfill_history.py --seasons 2022-23,2023-24,2024-25,2025-26 --o
 python scripts/train_model.py --history data/backfill --out data/model_v2.json
 ```
 
+### Floor–ceiling band (quantile models)
+
+A single mean projection hides how *risky* a pick is: a nailed midfielder on
+4.5 and a boom-or-bust forward on 4.5 plan very differently. Alongside the mean
+model, training fits two **quantile regressors** — scikit-learn
+`GradientBoostingRegressor(loss="quantile", alpha=0.1 / 0.9)`, same features and
+hyper-parameters — giving a **p10 (floor)** and **p90 (ceiling)** for every
+projection. They export to the *same* portable JSON (`model_v2.json → quantiles`)
+and score through the *same* dependency-free evaluator, so the live pipeline
+still needs no ML libraries. The band is clamped so the mean always sits inside
+it (`lo ≤ exp ≤ hi`), and it flows into `projections.json` per fixture (`lo`/`hi`)
+and aggregated (`next_lo/next_hi`, `sum_lo/sum_hi`).
+
+On the held-out 2025-26 season the band is well-calibrated — the actual score
+lands inside p10–p90 **87.7%** of the time (nominal 80%; slightly conservative),
+mean width ~4.85 pts. The UI shows it as *floor/ceiling* on the Captains page
+and the My Team captain: a low floor with a high ceiling flags a differential
+punt; a tight band flags a safe, nailed starter. For a single gameweek the floor
+is often 0 — FPL returns are very skewed and even premiums blank ~10% of the
+time — so the **ceiling** is usually what separates picks of equal mean.
+
+### Why not LightGBM?
+
+The richer learner was evaluated head-to-head on the same held-out season.
+LightGBM (tuned `num_leaves`, 400 trees) landed at **MAE 1.688** vs scikit-learn
+GBR's **1.690** — inside the noise, and worse at `num_leaves=31` (overfit).
+Because LightGBM serialises to a different tree format that the ~40-line portable
+evaluator ([`gbm.py`](../scripts/gbm.py)) can't read, adopting it would mean
+either shipping LightGBM into the live "Update data" workflow (breaking the
+dependency-free guarantee) or writing and maintaining a second evaluator — real
+cost for no measurable accuracy gain. We kept scikit-learn and spent the
+"richer model" budget on the **quantile band**, which adds genuinely new
+information (risk), not a third decimal place of MAE.
+
 ## Limitations & next steps
 
-- No explicit penalty/set-piece taker modelling yet (partly captured via xG).
+- Set-piece / penalty duty is a model feature now, but taker *changes*
+  mid-season lag until the data updates.
 - Bonus (BPS) is a simple rate, not a fitted BPS model.
 - Double/blank gameweeks are handled per-fixture but not yet surfaced as a
   planner.

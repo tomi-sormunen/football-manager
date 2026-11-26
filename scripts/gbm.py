@@ -28,11 +28,11 @@ def load_model(path):
     return None
 
 
-def predict(model, feat_list):
-    """Score one ordered feature vector (same order as model['features'])."""
-    total = model["init"]
-    lr = model["learning_rate"]
-    for t in model["trees"]:
+def _predict_trees(m, feat_list):
+    """Walk one tree-set {init, learning_rate, trees} for a feature vector."""
+    total = m["init"]
+    lr = m["learning_rate"]
+    for t in m["trees"]:
         left, right = t["left"], t["right"]
         feat, thr, val = t["feature"], t["threshold"], t["value"]
         node = 0
@@ -40,3 +40,17 @@ def predict(model, feat_list):
             node = left[node] if feat_list[feat[node]] <= thr[node] else right[node]
         total += lr * val[node]
     return total
+
+
+def predict(model, feat_list):
+    """Score one ordered feature vector (same order as model['features'])."""
+    return _predict_trees(model, feat_list)
+
+
+def predict_quantiles(model, feat_list):
+    """Score the exported quantile models → {tag: value} (e.g. p10/p90), or None
+    when the model carries no quantiles."""
+    q = model.get("quantiles") if model else None
+    if not q:
+        return None
+    return {tag: _predict_trees(sub, feat_list) for tag, sub in q.items()}

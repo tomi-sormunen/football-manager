@@ -103,6 +103,12 @@ is intended to be **swapped/improved** over time (see roadmap Phase 3).
   bank & squad value, projected GW total, squad injury alerts, and per-position
   **suggested transfers** ranked by 5-GW projected gain within your budget and
   the 3-per-club limit, with the −4 hit break-even.
+- ✅ **Suggested next-GW lineup** (`plannedLineup`) — the default My Team view
+  fields the best legal XI by projected next-GW points *after* applying the
+  recommended transfers, with captain/vice, bench order, an availability watch
+  for flagged starters, and the required transfers to field it. A toggle flips
+  to last GW's saved team. (The public API only exposes picks post-deadline, so
+  the plan — not a stale fetch — is the up-to-date source before a deadline.)
 - ✅ **Optional live team-id box** via a configurable transparent proxy
   (`config.json` → `entry_proxy`; e.g. a Cloudflare Worker or Supabase Edge
   Function) — the multi-user path.
@@ -123,8 +129,15 @@ is intended to be **swapped/improved** over time (see roadmap Phase 3).
   dataset (`backfill_history.py`) so real backtest numbers exist immediately.
   Backtested over 2022-23 + 2023-24 (30,797 samples), `xpts-v1` beats both
   baselines on MAE, RMSE and correlation — see [`MODEL.md`](MODEL.md).
-- ⬜ Upgrade `xpts-v1` toward a gradient-boosted model now that deep history
-  is a `backfill_history.py` run away.
+- ✅ **Gradient-boosted model (`xpts-v2`)** stacking on v1's features plus
+  recent-form, set-piece/penalty and transfer-market signals — cuts held-out MAE
+  ~10% vs v1. Trained offline (scikit-learn), scored live by a dependency-free
+  evaluator. See [`MODEL.md`](MODEL.md).
+- ✅ **Floor–ceiling (p10–p90) band** via quantile models shipped in the same
+  portable export — a risk range around each projection (87.7% held-out
+  coverage), surfaced as floor/ceiling on Captains and My Team. LightGBM was
+  evaluated and matched scikit-learn within noise, so we kept the clean
+  dependency-free path — see [`MODEL.md`](MODEL.md#why-not-lightgbm).
 
 ### Phase 3b — Planner  ✅
 - ✅ **Multi-transfer & chip planner** (the **Planner** view):

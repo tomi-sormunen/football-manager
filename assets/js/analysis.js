@@ -100,8 +100,16 @@ export function projectPlayer(bundle, p, horizon = 1) {
       ? { appearance: p.model.next_parts.appearance, attack: p.model.next_parts.attack,
           defence: p.model.next_parts.defence, defcon: p.model.next_parts.defcon }
       : null;
+    // Floor..ceiling band (p10..p90) when the quantile models are present.
+    const hasBand = slice.length && slice.every((g) => g.lo != null);
+    const loTotal = hasBand ? slice.reduce((s, g) => s + g.lo, 0) : null;
+    const hiTotal = hasBand ? slice.reduce((s, g) => s + g.hi, 0) : null;
     return {
       total: +total.toFixed(2), perGame: +perGame.toFixed(2),
+      lo: hasBand ? +(loTotal / slice.length).toFixed(2) : null,
+      hi: hasBand ? +(hiTotal / slice.length).toFixed(2) : null,
+      loTotal: hasBand ? +loTotal.toFixed(2) : null,
+      hiTotal: hasBand ? +hiTotal.toFixed(2) : null,
       fixtures, parts, detail: p.model.next_detail || null, source: 'model',
     };
   }
@@ -543,6 +551,84 @@ export function optimiseTransfers(bundle, sq, {
   // Recommend the highest net; tie-break toward fewer transfers.
   const recommend = byK.slice().sort((a, b) => b.net - a.net || a.k - b.k)[0];
   return { byK, recommend, freeTransfers, bank };
+}
+
+// ---- Planned next-GW lineup -------------------------------------------------
+
+// Expected points for a player in the next gameweek specifically (sums a double
+// GW, 0 on a blank). Prefers the model's per-GW output; falls back to the
+// single-fixture projection when a model isn't available.
+export function nextGwExp(bundle, p) {
+  const gw = bundle.meta.next_gw;
+  if (p.model && p.model.by_gw && p.model.by_gw.length) return gwExp(p, gw);
+  return projectPlayer(bundle, p, 1).perGame;
+}
+
+// Build the *suggested* lineup for the upcoming gameweek: start from the current
+// 15, apply the recommended transfers (so required incomings are in the squad),
+// then field the best legal XI by next-GW expected points, pick the captain /
+// vice, and order the bench. This is what the manager should actually submit for
+// the next deadline — as opposed to `squad()`, which is last GW's saved team.
+//
+// The XI is expected-points-optimal and therefore consistent with the rest of
+// the tool: a high-EV but flagged player (e.g. a doubtful first-choice keeper)
+// can still be the best start. Such players are returned in `flaggedStarters`
+// with their best bench alternative so the UI can surface the availability
+// trade-off and the suggested replacement explicitly rather than guessing.
+export function plannedLineup(bundle, sq, { freeTransfers = 1 } = {}) {
+  const gw = bundle.meta.next_gw;
+  const exp = (p) => nextGwExp(bundle, p);
+
+  // Which transfers to bake in: the combined optimiser's recommendation at the
+  // given free-transfer count (may be zero — then we just re-pick the XI).
+  const opt = optimiseTransfers(bundle, sq, { freeTransfers, maxTransfers: 3 });
+  const transfers = opt.recommend.transfers;
+  const outIds = new Set(transfers.map((t) => t.out.id));
+  const incoming = transfers.map((t) => t.in);
+  const incomingIds = new Set(incoming.map((p) => p.id));
+
+  const planned15 = [...sq.all.filter((p) => !outIds.has(p.id)), ...incoming];
+  const expById = new Map(planned15.map((p) => [p.id, exp(p)]));
+
+  const { xi, bench } = bestXI(planned15, expById);
+
+  // Captain / vice: highest expected points in the XI.
+  const rankedXi = xi.slice()
+    .sort((a, b) => (expById.get(b.id) || 0) - (expById.get(a.id) || 0));
+  const captain = rankedXi[0] || null;
+  const vice = rankedXi[1] || null;
+
+  // Bench order: outfielders by expected points (autosub priority), reserve GK
+  // last (FPL fills the GK slot separately).
+  const bench2 = bench.slice().sort((a, b) => {
+    const ag = a.pos === 'GKP', bg = b.pos === 'GKP';
+    if (ag !== bg) return ag ? 1 : -1;
+    return (expById.get(b.id) || 0) - (expById.get(a.id) || 0);
+  });
+
+  const xiIds = new Set(xi.map((p) => p.id));
+  // Flagged players who are nonetheless in the XI — surface the trade-off.
+  const flaggedStarters = xi.filter((p) => p.flagged).map((p) => {
+    const alt = bench2
+      .filter((bp) => bp.pos === p.pos || (p.pos === 'GKP') === (bp.pos === 'GKP'))
+      .sort((a, b) => (expById.get(b.id) || 0) - (expById.get(a.id) || 0))[0] || null;
+    // the suggested incoming replacement for this player, if a transfer covers it
+    const replacement = transfers.find((t) => t.out.id === p.id)?.in || null;
+    return { p, exp: +(expById.get(p.id) || 0).toFixed(1),
+      benchAlt: alt, benchAltExp: alt ? +(expById.get(alt.id) || 0).toFixed(1) : null,
+      replacement };
+  });
+
+  const xiTotal = xi.reduce((s, p) => s + (expById.get(p.id) || 0), 0);
+  const capExtra = captain ? (expById.get(captain.id) || 0) : 0;
+
+  return {
+    gw, transfers, recommend: opt.recommend, byK: opt.byK, bank: opt.bank, freeTransfers,
+    incoming, incomingIds, outgoing: outIds, planned15, xi, bench: bench2,
+    captain, vice, expById, xiIds, flaggedStarters,
+    projected: +(xiTotal + capExtra).toFixed(1),
+    benchProj: +bench2.reduce((s, p) => s + (expById.get(p.id) || 0), 0).toFixed(1),
+  };
 }
 
 // Price movers this gameweek.

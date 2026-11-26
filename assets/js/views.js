@@ -174,6 +174,8 @@ export function dashboard(bundle) {
       `MAE ${v2val.v2.mae} vs ${v2val.v1.mae} for v1 (−`
       + `${Math.round((1 - v2val.v2.mae / v2val.v1.mae) * 100)}%), `
       + `correlation ${v2val.v2.corr} vs ${v2val.v1.corr}`,
+      v2val.band ? `. Floor–ceiling band covers ${Math.round(v2val.band.coverage * 100)}% `
+        + 'of outcomes' : '',
       h('span', { class: 'muted small' }, ` — held-out season ${v2val.season}, `
         + `${v2val.v2.n.toLocaleString()} player-GW samples`),
     ]));
@@ -374,7 +376,9 @@ export function captains(bundle) {
             fdrBadge(f.fdr, `${f.opp_short} (${f.home ? 'H' : 'A'})`)] : '—'),
         h('div', { class: 'capproj' }, [
           h('span', { class: 'muted small' }, 'Projected'),
-          h('span', { class: 'bignum' }, proj.perGame.toFixed(1))]),
+          h('span', { class: 'bignum' }, proj.perGame.toFixed(1)),
+          proj.lo != null ? h('span', { class: 'muted small range' },
+            `floor ${proj.lo.toFixed(1)} · ceiling ${proj.hi.toFixed(1)}`) : null]),
       ]),
       h('div', { class: 'capbars' }, [
         bar('Mins', parts.appearance, max),
@@ -386,8 +390,9 @@ export function captains(bundle) {
 
   wrap.append(card('Captaincy rankings', list));
   wrap.append(note(projectionBlurb(bundle) + ' Bars break the next-fixture projection ' +
-    'into appearance, attacking return, clean-sheet value and DEFCON. Consider a ' +
-    'differential captain if chasing rank.'));
+    'into appearance, attacking return, clean-sheet value and DEFCON. Floor/ceiling is the ' +
+    'model’s p10–p90 range — a high ceiling with a low floor is a boom-or-bust pick. Consider ' +
+    'a differential captain if chasing rank.'));
   return wrap;
 }
 
@@ -476,6 +481,16 @@ export function differentials(bundle) {
 export function myTeam(bundle) {
   const wrap = h('div', { class: 'view' });
 
+  // View mode, persisted per browser. Default to the *planned* next-GW lineup —
+  // the saved picks are last GW's team; the plan is what to submit next.
+  let mode = 'planned';
+  try { const m = localStorage.getItem('fpl_myteam_mode');
+    if (m === 'last' || m === 'planned') mode = m; } catch { /* ignore */ }
+  // Free transfers available (shared with the Planner's control).
+  let ft = 1;
+  try { ft = Math.max(0, Math.min(5, +(localStorage.getItem('fpl_ft') ?? 1))); }
+  catch { ft = 1; }
+
   const render = () => {
     const sq = A.squad(bundle);
     const parts = [teamIdCard(bundle, render)];
@@ -494,7 +509,14 @@ export function myTeam(bundle) {
     }
 
     const e = sq.entry;
-    const sp = A.squadProjection(bundle, sq);
+    const hasModel = A.hasModel(bundle);
+    // Without projections we can't plan a lineup — fall back to the saved view.
+    const planned = hasModel ? A.plannedLineup(bundle, sq, { freeTransfers: ft }) : null;
+    const showPlanned = mode === 'planned' && planned;
+
+    // Header stats — the projected total reflects the active view.
+    const lastProj = A.squadProjection(bundle, sq);
+    const headerProj = showPlanned ? planned.projected : lastProj.total;
     const stat = (label, val) => h('div', { class: 'stat' }, [
       h('span', { class: 'stat-label' }, label), h('div', { class: 'stat-val' }, val)]);
     parts.push(h('div', { class: 'stats' }, [
@@ -502,65 +524,32 @@ export function myTeam(bundle) {
       stat('Overall', h('strong', {}, e.overall_points != null
         ? `${e.overall_points.toLocaleString()} pts` : '—')),
       stat('In the bank', h('strong', {}, `£${(e.bank ?? 0).toFixed(1)}m`)),
-      stat(`GW${bundle.meta.next_gw} projected`, h('strong', {}, sp.total.toFixed(1))),
+      stat(`GW${bundle.meta.next_gw} projected`, h('strong', {}, headerProj.toFixed(1))),
     ]));
     if (e.source === 'sample') {
       parts.push(h('div', { class: 'banner' },
         'Sample squad — set your team ID and run the Action to load your real team.'));
     }
 
-    parts.push(card(`Your team — GW${e.event}`, pitch(bundle, sq),
-      h('span', { class: 'muted small' }, `Captain contributes +${sp.captain.toFixed(1)}`)));
+    // Toggle: planned next GW vs last GW's saved team.
+    const setMode = (m) => { if (m === mode) return; mode = m;
+      try { localStorage.setItem('fpl_myteam_mode', m); } catch { /* ignore */ }
+      render(); };
+    const segBtn = (m, label) => h('button',
+      { class: mode === m ? 'on' : '', onclick: () => setMode(m) }, label);
+    const toggle = h('div', { class: 'controls' }, [
+      h('div', { class: 'segmented' }, [
+        segBtn('planned', `Next GW (planned)`), segBtn('last', 'Last GW (saved)')]),
+      h('span', { class: 'muted small' }, showPlanned
+        ? `Suggested XI for GW${bundle.meta.next_gw}`
+        : `As submitted in GW${e.event}`),
+    ]);
+    parts.push(card('View', toggle));
 
-    // Captain advice
-    const ca = A.captainAdvice(bundle, sq);
-    if (ca.best) {
-      const same = sq.captain && ca.best.p.id === sq.captain.id;
-      const curProj = sq.captain
-        ? A.projectPlayer(bundle, sq.captain, 1).perGame.toFixed(1) : '—';
-      parts.push(card('Captaincy', h('div', { class: 'advice' }, [
-        same
-          ? h('p', {}, [okTick(), ' Your captain ', b(sq.captain.web),
-            ` is also the model’s top pick for GW${bundle.meta.next_gw} `,
-            `(${ca.best.proj.toFixed(1)} pts).`])
-          : h('p', {}, [warnTick(), ' Consider captaining ', b(ca.best.p.web),
-            ` (${ca.best.proj.toFixed(1)}) over `, b(sq.captain ? sq.captain.web : '—'),
-            ` (${curProj}) for GW${bundle.meta.next_gw}.`]),
-      ])));
-    }
-
-    // Flags
-    const flags = A.squadFlags(sq);
-    if (flags.length) {
-      parts.push(card('⚠︎ Squad alerts', h('ul', { class: 'watch' },
-        flags.map((p) => h('li', {}, [statusDot(p), h('span', { class: 'pname' }, p.web),
-          h('span', { class: 'muted small' },
-            `${STATUS[p.status]?.label}${p.news ? ' — ' + p.news : ''}`)])))));
-    }
-
-    // Transfer suggestions
-    const sugg = A.transferSuggestions(bundle, sq, { limit: 5 });
-    const sBody = sugg.length ? table([
-      { key: 'out', label: 'Out', get: (r) => r.out.web, sortable: false,
-        fmt: (_v, r) => playerCell(r.out) },
-      { key: 'in', label: 'In', get: (r) => r.in.web, sortable: false,
-        fmt: (_v, r) => playerCell(r.in) },
-      { key: 'op', label: 'Out proj5', align: 'right', get: (r) => r.outProj, sortable: false,
-        fmt: (v) => v.toFixed(1) },
-      { key: 'ip', label: 'In proj5', align: 'right', get: (r) => r.inProj, sortable: false,
-        fmt: (v) => v.toFixed(1) },
-      { key: 'gain', label: 'Gain', align: 'right', get: (r) => r.gain, sortable: false,
-        fmt: (v) => h('strong', {}, `+${v.toFixed(1)}`) },
-      { key: 'hit', label: 'After −4 hit', align: 'right', get: (r) => r.netAfterHit,
-        sortable: false, fmt: (v) => h('span', { class: v > 0 ? 'pos-ok' : 'muted' },
-          `${v > 0 ? '+' : ''}${v.toFixed(1)}`) },
-    ], sugg) : note('No affordable upgrade improves your squad’s 5-GW projection right now.');
-    parts.push(card('Suggested transfers', h('div', {}, [sBody, note(
-      'Ranked by projected points gained over the next 5 GWs, within your bank ' +
-      '(£' + (e.bank ?? 0).toFixed(1) + 'm) and the 3-per-club limit. “After −4 hit” ' +
-      'is the net if this isn’t a free transfer — only worthwhile when positive. ' +
-      'Sell prices are approximated by current price (the public API hides exact ' +
-      'sell value).')])));
+    if (showPlanned) parts.push(...plannedCards(bundle, sq, planned, e,
+      (v) => { ft = v; try { localStorage.setItem('fpl_ft', String(v)); } catch { /* ignore */ }
+        render(); }));
+    else parts.push(...lastGwCards(bundle, sq, e, hasModel));
 
     wrap.replaceChildren(...parts);
   };
@@ -573,27 +562,181 @@ function b(text) { return h('strong', {}, text); }
 function okTick() { return h('span', { class: 'pos-ok' }, '✓'); }
 function warnTick() { return h('span', { class: 'arrow down' }, '➜'); }
 
-function pitch(bundle, sq) {
+// Cards for the suggested next-GW lineup (the default My Team view).
+function plannedCards(bundle, sq, pl, e, setFt) {
+  const parts = [];
+  const nextGw = bundle.meta.next_gw;
+
+  // Free-transfer control.
+  const ftInput = h('input', { type: 'number', min: '0', max: '5',
+    value: String(pl.freeTransfers), class: 'teamid', style: 'min-width:64px',
+    oninput: (ev) => setFt(Math.max(0, Math.min(5, +ev.target.value || 0))) });
+
+  // 1) Suggested lineup on the pitch.
+  const rec = pl.recommend;
+  const capProj = pl.captain ? A.projectPlayer(bundle, pl.captain, 1) : null;
+  const capRange = capProj && capProj.lo != null
+    ? ` [floor ${capProj.lo.toFixed(1)} · ceiling ${capProj.hi.toFixed(1)}]` : '';
+  const foot = h('span', { class: 'muted small' }, [
+    pl.captain ? `Captain ${pl.captain.web} (+${(pl.expById.get(pl.captain.id) || 0).toFixed(1)})${capRange}. ` : '',
+    rec.k ? `Includes ${rec.k} transfer${rec.k > 1 ? 's' : ''}` : 'No transfers',
+    rec.hits ? ` (−${rec.hits * 4} hit)` : '', '.']);
+  parts.push(card(`Suggested lineup — GW${nextGw}`,
+    pitch(bundle, pl, { expFn: (p) => pl.expById.get(p.id) || 0, incoming: pl.incomingIds }),
+    foot));
+
+  // 2) Required transfers to field this lineup.
+  const head = rec.k === 0
+    ? h('p', {}, [okTick(), ' ', b('No transfers needed'),
+      ' — your current 15 is already the best option over the next 5 GWs. Roll your free transfer.'])
+    : h('p', {}, [b(`Make ${rec.k} transfer${rec.k > 1 ? 's' : ''}`),
+      rec.hits ? h('span', { class: 'arrow down' }, ` (−${rec.hits * 4} hit)`) : null,
+      ` — projected net +${rec.net.toFixed(1)} pts over 5 GWs`,
+      rec.cost !== 0 ? h('span', { class: 'muted small' },
+        `, ${rec.cost > 0 ? 'spends' : 'frees'} £${Math.abs(rec.cost).toFixed(1)}m`) : null, '.']);
+  const tbl = rec.transfers.length ? table([
+    { key: 'out', label: 'Out', get: (r) => r.out.web, sortable: false,
+      fmt: (_v, r) => playerCell(r.out) },
+    { key: 'in', label: 'In', get: (r) => r.in.web, sortable: false,
+      fmt: (_v, r) => playerCell(r.in) },
+    { key: 'cost', label: 'Cost', align: 'right', get: (r) => r.cost, sortable: false,
+      fmt: (v) => h('span', { class: 'muted small' }, `${v > 0 ? '+' : ''}£${v.toFixed(1)}m`) },
+    { key: 'gain', label: 'Gain (5GW)', align: 'right', get: (r) => r.gain, sortable: false,
+      fmt: (v) => h('strong', {}, `+${v.toFixed(1)}`) },
+  ], rec.transfers) : null;
+  const compare = h('div', { class: 'plan-compare' }, (pl.byK || []).map((o) =>
+    h('span', { class: 'plan-opt' + (o.k === rec.k ? ' on' : '') },
+      `${o.k} transfer${o.k === 1 ? '' : 's'}: net ${o.net >= 0 ? '+' : ''}${o.net.toFixed(1)}`
+      + (o.hits ? ` (−${o.hits * 4})` : ''))));
+  parts.push(card('Required transfers', h('div', {}, [
+    h('div', { class: 'controls' }, [h('label', { class: 'rangelbl' },
+      [h('span', { class: 'muted small' }, 'Free transfers available '), ftInput])]),
+    head, tbl, compare].filter(Boolean)),
+    h('span', { class: 'muted small' }, `GW${nextGw}`)));
+
+  // 3) Availability watch — flagged players kept in the XI on expected value,
+  // with the safer bench swap and any suggested replacement spelled out.
+  if (pl.flaggedStarters.length) {
+    const items = pl.flaggedStarters.map((f) => h('div', { class: 'avail' }, [
+      h('p', {}, [warnTick(), ' ', b(f.p.web), ` — ${STATUS[f.p.status]?.label}`,
+        f.p.news ? ` (${f.p.news})` : '', '. ',
+        `Still your highest expected GW${nextGw} option in that slot `,
+        `(${f.exp}${f.benchAlt ? ` vs ${f.benchAlt.web} ${f.benchAltExp}` : ''}), so it starts on points — but it’s a risk.`]),
+      h('p', { class: 'muted small' }, [
+        f.benchAlt ? `If ruled out, start ${f.benchAlt.web} instead. ` : '',
+        f.replacement ? `Suggested replacement: ${f.replacement.web} (see Required transfers).`
+          : 'No like-for-like upgrade is affordable right now.']),
+    ]));
+    parts.push(card('⚠︎ Availability watch', h('div', {}, items)));
+  }
+
+  // 4) Squad alerts — every flagged player and whether the plan starts or benches them.
+  const flags = A.squadFlags({ all: pl.planned15 });
+  if (flags.length) {
+    parts.push(card('Squad alerts', h('ul', { class: 'watch' },
+      flags.map((p) => h('li', {}, [statusDot(p), h('span', { class: 'pname' }, p.web),
+        h('span', { class: 'muted small' },
+          `${STATUS[p.status]?.label}${p.news ? ' — ' + p.news : ''} · `
+          + `${pl.xiIds.has(p.id) ? 'in your XI' : 'on the bench'}`)])))));
+  }
+
+  parts.push(note('This is the lineup to submit for the next deadline: the best legal XI by '
+    + 'projected GW points from your 15 (after the required transfers), with captain and bench '
+    + 'order. The pitch shows each player’s expected GW points; green “IN” marks incoming transfers. '
+    + 'The plan maximises net points after −4 hits — switch to “Last GW (saved)” to see what you '
+    + 'actually fielded. Sell prices are approximated by current price (the public API hides exact '
+    + 'sell value).'));
+  return parts;
+}
+
+// Cards for last GW's saved team (the toggle's secondary view).
+function lastGwCards(bundle, sq, e, hasModel) {
+  const parts = [];
+  const sp = A.squadProjection(bundle, sq);
+  if (!hasModel) parts.push(note('Projections aren’t available yet (data/projections.json). '
+    + 'Showing your saved team; run the “Update data & deploy to Pages” Action to enable the '
+    + 'planned next-GW lineup.'));
+
+  parts.push(card(`Your team — GW${e.event} (as submitted)`, pitch(bundle, sq),
+    h('span', { class: 'muted small' }, `Captain contributes +${sp.captain.toFixed(1)}`)));
+
+  const ca = A.captainAdvice(bundle, sq);
+  if (ca.best) {
+    const same = sq.captain && ca.best.p.id === sq.captain.id;
+    const curProj = sq.captain
+      ? A.projectPlayer(bundle, sq.captain, 1).perGame.toFixed(1) : '—';
+    parts.push(card('Captaincy', h('div', { class: 'advice' }, [
+      same
+        ? h('p', {}, [okTick(), ' Your captain ', b(sq.captain.web),
+          ` is also the model’s top pick for GW${bundle.meta.next_gw} `,
+          `(${ca.best.proj.toFixed(1)} pts).`])
+        : h('p', {}, [warnTick(), ' Consider captaining ', b(ca.best.p.web),
+          ` (${ca.best.proj.toFixed(1)}) over `, b(sq.captain ? sq.captain.web : '—'),
+          ` (${curProj}) for GW${bundle.meta.next_gw}.`]),
+    ])));
+  }
+
+  const flags = A.squadFlags(sq);
+  if (flags.length) {
+    parts.push(card('⚠︎ Squad alerts', h('ul', { class: 'watch' },
+      flags.map((p) => h('li', {}, [statusDot(p), h('span', { class: 'pname' }, p.web),
+        h('span', { class: 'muted small' },
+          `${STATUS[p.status]?.label}${p.news ? ' — ' + p.news : ''}`)])))));
+  }
+
+  const sugg = A.transferSuggestions(bundle, sq, { limit: 5 });
+  const sBody = sugg.length ? table([
+    { key: 'out', label: 'Out', get: (r) => r.out.web, sortable: false,
+      fmt: (_v, r) => playerCell(r.out) },
+    { key: 'in', label: 'In', get: (r) => r.in.web, sortable: false,
+      fmt: (_v, r) => playerCell(r.in) },
+    { key: 'op', label: 'Out proj5', align: 'right', get: (r) => r.outProj, sortable: false,
+      fmt: (v) => v.toFixed(1) },
+    { key: 'ip', label: 'In proj5', align: 'right', get: (r) => r.inProj, sortable: false,
+      fmt: (v) => v.toFixed(1) },
+    { key: 'gain', label: 'Gain', align: 'right', get: (r) => r.gain, sortable: false,
+      fmt: (v) => h('strong', {}, `+${v.toFixed(1)}`) },
+    { key: 'hit', label: 'After −4 hit', align: 'right', get: (r) => r.netAfterHit,
+      sortable: false, fmt: (v) => h('span', { class: v > 0 ? 'pos-ok' : 'muted' },
+        `${v > 0 ? '+' : ''}${v.toFixed(1)}`) },
+  ], sugg) : note('No affordable upgrade improves your squad’s 5-GW projection right now.');
+  parts.push(card('Suggested transfers', h('div', {}, [sBody, note(
+    'Ranked by projected points gained over the next 5 GWs, within your bank ' +
+    '(£' + (e.bank ?? 0).toFixed(1) + 'm) and the 3-per-club limit. “After −4 hit” ' +
+    'is the net if this isn’t a free transfer — only worthwhile when positive. ' +
+    'Sell prices are approximated by current price (the public API hides exact ' +
+    'sell value).')])));
+  return parts;
+}
+
+// Render an XI + bench on a pitch. `lineup` provides { xi, bench, captain, vice }.
+// opts.expFn sets the per-player number shown (default: next-fixture projection);
+// opts.incoming is an id Set of transfers-in to badge "IN".
+function pitch(bundle, lineup, opts = {}) {
+  const expFn = opts.expFn || ((p) => A.projectPlayer(bundle, p, 1).perGame);
+  const incoming = opts.incoming || null;
   const chip = (p) => {
-    const proj = A.projectPlayer(bundle, p, 1).perGame;
-    const isC = sq.captain && sq.captain.id === p.id;
-    const isV = sq.vice && sq.vice.id === p.id;
-    return h('div', { class: 'chip' + (p.flagged ? ' chip-flag' : '') }, [
+    const proj = expFn(p);
+    const isC = lineup.captain && lineup.captain.id === p.id;
+    const isV = lineup.vice && lineup.vice.id === p.id;
+    const isIn = incoming && incoming.has(p.id);
+    return h('div', { class: 'chip' + (p.flagged ? ' chip-flag' : '') + (isIn ? ' chip-in' : '') }, [
       h('div', { class: 'chip-badges' }, [
         isC ? h('span', { class: 'cap' }, 'C') : (isV ? h('span', { class: 'vice' }, 'V') : null),
+        isIn ? h('span', { class: 'in-badge' }, 'IN') : null,
         p.flagged ? h('span', { class: 'dot dot-flag' }) : null]),
       h('div', { class: 'chip-name' }, p.web),
       h('div', { class: 'chip-sub' }, `${p.team_short} · ${proj.toFixed(1)}`),
     ]);
   };
   const rows = POS_ORDER.map((pos) => {
-    const line = sq.xi.filter((p) => p.pos === pos);
+    const line = lineup.xi.filter((p) => p.pos === pos);
     return line.length ? h('div', { class: 'pitch-row' }, line.map(chip)) : null;
   }).filter(Boolean);
   return h('div', {}, [
     h('div', { class: 'pitch' }, rows),
     h('div', { class: 'bench' }, [h('span', { class: 'bench-lbl' }, 'Bench'),
-      ...sq.bench.map(chip)]),
+      ...lineup.bench.map(chip)]),
   ]);
 }
 
@@ -617,7 +760,9 @@ function teamIdCard(bundle, rerender) {
         rerender();
       } catch (err) { status.textContent = `Could not load team ${id}: ${err.message}`; }
     } else if (String(id) === String(bundle.entry?.id)) {
-      status.textContent = 'This is the team loaded by the Action.';
+      status.textContent = `Loaded by the Action (GW${bundle.entry?.event}). The public `
+        + 'API only exposes picks after a deadline, so pending pre-deadline transfers '
+        + 'aren’t fetchable — the “Next GW (planned)” view above is the up-to-date plan.';
     } else {
       status.textContent = 'Saved. To load a different team without a proxy, set ' +
         'FPL_TEAM_ID / config.json and re-run the Action (the browser can’t call the ' +

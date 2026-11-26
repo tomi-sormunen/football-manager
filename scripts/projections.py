@@ -251,6 +251,12 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON,
             scale = v2 / v1                      # keep v1 parts, rescale to v2 total
             proj["parts"] = {k: round(val * scale, 2) for k, val in proj["parts"].items()}
             proj["exp"] = round(v2, 2)
+            # Floor..ceiling band from the quantile models, clamped so the mean
+            # always sits inside it (lo ≤ exp ≤ hi) and never goes negative.
+            q = gbm.predict_quantiles(model_v2, vec)
+            if q:
+                proj["lo"] = round(max(0.0, min(q.get("p10", v2), v2)), 2)
+                proj["hi"] = round(max(q.get("p90", v2), v2), 2)
         return proj
 
     result = {}
@@ -263,13 +269,21 @@ def project_all(players, teams, fixtures, meta, history, horizon=HORIZON,
             proj["gw"], proj["opp"], proj["home"] = gw, opp, home
             by_gw.append(proj)
         total5 = round(sum(x["exp"] for x in by_gw), 2)
+        has_band = bool(by_gw) and all("lo" in x for x in by_gw)
         result[pid] = {
             "next": by_gw[0]["exp"] if by_gw else 0.0,
             "next_parts": by_gw[0]["parts"] if by_gw else None,
             "next_detail": by_gw[0]["detail"] if by_gw else None,
             "sum": total5,
-            "by_gw": [{"gw": x["gw"], "exp": x["exp"]} for x in by_gw],
+            "by_gw": [{"gw": x["gw"], "exp": x["exp"],
+                       **({"lo": x["lo"], "hi": x["hi"]} if "lo" in x else {})}
+                      for x in by_gw],
         }
+        if has_band:
+            result[pid]["next_lo"] = by_gw[0]["lo"]
+            result[pid]["next_hi"] = by_gw[0]["hi"]
+            result[pid]["sum_lo"] = round(sum(x["lo"] for x in by_gw), 2)
+            result[pid]["sum_hi"] = round(sum(x["hi"] for x in by_gw), 2)
     from model import FORM_WEIGHT, CS_FORM_WEIGHT
     return {
         "meta": {
