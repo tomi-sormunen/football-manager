@@ -264,6 +264,22 @@ td.al-center, th.al-center { text-align: center; }
   color: #fff; border-radius: 9px; font: inherit; font-weight: 600; cursor: pointer;
 }
 .btn:hover { filter: brightness(1.06); }
+.btn.ghost { background: transparent; color: var(--accent); }
+
+/* My Team: planned-lineup toggle + incoming badge */
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 999px;
+  overflow: hidden; background: var(--surface-2); }
+.segmented button { font: inherit; font-weight: 600; font-size: 13px; padding: 6px 14px;
+  border: none; background: transparent; color: var(--text-dim); cursor: pointer; }
+.segmented button.on { background: var(--accent); color: #fff; }
+.chip-in { border-color: color-mix(in srgb, var(--ok) 60%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok) 40%, transparent), var(--shadow); }
+.chip .in-badge { background: var(--ok); color: #fff; font-size: 9px; font-weight: 800;
+  letter-spacing: .03em; padding: 1px 4px; border-radius: 6px; display: grid; place-items: center; }
+.avail { border: 1px solid color-mix(in srgb, var(--flag) 45%, var(--border));
+  background: color-mix(in srgb, var(--flag) 8%, var(--surface)); border-radius: 10px;
+  padding: 10px 14px; margin: 4px 0; }
+.avail p { margin: 4px 0; }
 
 /* Planner */
 .gw-tag { font-size: 11px; font-weight: 800; }
