@@ -40,8 +40,8 @@ def _metrics(pred, actual):
     return {"n": n, "mae": round(mae, 3), "rmse": round(rmse, 3), "corr": round(corr, 3)}
 
 
-def export_model(gbr, features):
-    """Serialise a fitted GradientBoostingRegressor to plain JSON trees."""
+def _export_trees(gbr):
+    """Serialise a fitted GradientBoostingRegressor's trees to plain lists."""
     trees = []
     for stage in gbr.estimators_:
         t = stage[0].tree_
@@ -53,21 +53,44 @@ def export_model(gbr, features):
             "value": [round(float(v[0][0]), 5) for v in t.value],
         })
     return {
-        "model": "xpts-v2",
-        "features": features,
         "init": round(float(gbr.init_.constant_.ravel()[0]), 5),
         "learning_rate": float(gbr.learning_rate),
         "trees": trees,
     }
 
 
+def export_model(gbr, features):
+    """Serialise a fitted GradientBoostingRegressor to a portable JSON model."""
+    return {"model": "xpts-v2", "features": features, **_export_trees(gbr)}
+
+
+# The gradient-boosting hyper-parameters, shared by the mean model and the
+# quantile models so the trees are directly comparable. (LightGBM was evaluated
+# here and matched this to within noise — MAE 1.688 vs 1.690 on the held-out
+# season — so we keep scikit-learn, whose trees export cleanly to the portable,
+# dependency-free evaluator. See docs/MODEL.md.)
+GBM_PARAMS = dict(n_estimators=200, max_depth=3, learning_rate=0.05,
+                  subsample=0.8, min_samples_leaf=60)
+
+
 def train(X, y, seed=0):
     from sklearn.ensemble import GradientBoostingRegressor
-    gbr = GradientBoostingRegressor(
-        n_estimators=200, max_depth=3, learning_rate=0.05,
-        subsample=0.8, min_samples_leaf=60, random_state=seed)
+    gbr = GradientBoostingRegressor(random_state=seed, **GBM_PARAMS)
     gbr.fit(X, y)
     return gbr
+
+
+def train_quantile(X, y, alpha, seed=0):
+    """Fit a quantile regressor (the α-quantile of points), for floor/ceiling."""
+    from sklearn.ensemble import GradientBoostingRegressor
+    gbr = GradientBoostingRegressor(loss="quantile", alpha=alpha,
+                                    random_state=seed, **GBM_PARAMS)
+    gbr.fit(X, y)
+    return gbr
+
+
+# Quantiles exported alongside the mean model → a p10..p90 band per projection.
+QUANTILES = {"p10": 0.1, "p90": 0.9}
 
 
 def main(argv=None):
@@ -111,20 +134,37 @@ def main(argv=None):
     print(f"                        v2  MAE {m2['mae']}  RMSE {m2['rmse']}  corr {m2['corr']}")
     print(f"  → v2 vs v1: MAE {m2['mae'] - m1['mae']:+.3f}, corr {m2['corr'] - m1['corr']:+.3f}")
 
+    # Quantile band: validate p10/p90 coverage (how often the actual lands inside
+    # the predicted floor..ceiling) leakage-free on the held-out season.
+    q10 = train_quantile(Xtr, ytr, QUANTILES["p10"])
+    q90 = train_quantile(Xtr, ytr, QUANTILES["p90"])
+    lo = [max(0.0, x) for x in q10.predict(Xval)]
+    hi = [max(0.0, x) for x in q90.predict(Xval)]
+    inside = sum(1 for a, l, h in zip(yval, lo, hi) if l <= a <= h) / len(yval)
+    width = sum(h - l for l, h in zip(lo, hi)) / len(yval)
+    print(f"  p10..p90 band: coverage {inside:.3f} (target ~0.80), "
+          f"mean width {width:.2f} pts")
+
     # Ship a model trained on ALL seasons (max data), exporting the portable JSON.
     Xall = [r for lbl in ex for r in ex[lbl][0]]
     yall = [v for lbl in ex for v in ex[lbl][1]]
     final = train(Xall, yall)
     model = export_model(final, FEATURES)
+    # Quantile models (p10/p90) trained on all seasons, for the floor..ceiling band.
+    model["quantiles"] = {tag: _export_trees(train_quantile(Xall, yall, a))
+                          for tag, a in QUANTILES.items()}
     model["trained_on"] = [d[0] for d in datasets]
-    model["validation"] = {"season": val_label, "v1": m1, "v2": m2}
+    model["validation"] = {"season": val_label, "v1": m1, "v2": m2,
+                           "band": {"coverage": round(inside, 3),
+                                    "mean_width": round(width, 2)}}
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(model, fh, separators=(",", ":"))
         fh.write("\n")
     size_kb = os.path.getsize(args.out) // 1024
-    print(f"Wrote {args.out} ({len(model['trees'])} trees, {size_kb} KB, "
-          f"trained on {len(yall)} rows).")
+    qtrees = sum(len(q["trees"]) for q in model["quantiles"].values())
+    print(f"Wrote {args.out} ({len(model['trees'])} mean + {qtrees} quantile trees, "
+          f"{size_kb} KB, trained on {len(yall)} rows).")
     return 0
 
 

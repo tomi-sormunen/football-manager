@@ -100,8 +100,16 @@ export function projectPlayer(bundle, p, horizon = 1) {
       ? { appearance: p.model.next_parts.appearance, attack: p.model.next_parts.attack,
           defence: p.model.next_parts.defence, defcon: p.model.next_parts.defcon }
       : null;
+    // Floor..ceiling band (p10..p90) when the quantile models are present.
+    const hasBand = slice.length && slice.every((g) => g.lo != null);
+    const loTotal = hasBand ? slice.reduce((s, g) => s + g.lo, 0) : null;
+    const hiTotal = hasBand ? slice.reduce((s, g) => s + g.hi, 0) : null;
     return {
       total: +total.toFixed(2), perGame: +perGame.toFixed(2),
+      lo: hasBand ? +(loTotal / slice.length).toFixed(2) : null,
+      hi: hasBand ? +(hiTotal / slice.length).toFixed(2) : null,
+      loTotal: hasBand ? +loTotal.toFixed(2) : null,
+      hiTotal: hasBand ? +hiTotal.toFixed(2) : null,
       fixtures, parts, detail: p.model.next_detail || null, source: 'model',
     };
   }

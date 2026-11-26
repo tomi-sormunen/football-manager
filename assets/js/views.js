@@ -174,6 +174,8 @@ export function dashboard(bundle) {
       `MAE ${v2val.v2.mae} vs ${v2val.v1.mae} for v1 (−`
       + `${Math.round((1 - v2val.v2.mae / v2val.v1.mae) * 100)}%), `
       + `correlation ${v2val.v2.corr} vs ${v2val.v1.corr}`,
+      v2val.band ? `. Floor–ceiling band covers ${Math.round(v2val.band.coverage * 100)}% `
+        + 'of outcomes' : '',
       h('span', { class: 'muted small' }, ` — held-out season ${v2val.season}, `
         + `${v2val.v2.n.toLocaleString()} player-GW samples`),
     ]));
@@ -374,7 +376,9 @@ export function captains(bundle) {
             fdrBadge(f.fdr, `${f.opp_short} (${f.home ? 'H' : 'A'})`)] : '—'),
         h('div', { class: 'capproj' }, [
           h('span', { class: 'muted small' }, 'Projected'),
-          h('span', { class: 'bignum' }, proj.perGame.toFixed(1))]),
+          h('span', { class: 'bignum' }, proj.perGame.toFixed(1)),
+          proj.lo != null ? h('span', { class: 'muted small range' },
+            `floor ${proj.lo.toFixed(1)} · ceiling ${proj.hi.toFixed(1)}`) : null]),
       ]),
       h('div', { class: 'capbars' }, [
         bar('Mins', parts.appearance, max),
@@ -386,8 +390,9 @@ export function captains(bundle) {
 
   wrap.append(card('Captaincy rankings', list));
   wrap.append(note(projectionBlurb(bundle) + ' Bars break the next-fixture projection ' +
-    'into appearance, attacking return, clean-sheet value and DEFCON. Consider a ' +
-    'differential captain if chasing rank.'));
+    'into appearance, attacking return, clean-sheet value and DEFCON. Floor/ceiling is the ' +
+    'model’s p10–p90 range — a high ceiling with a low floor is a boom-or-bust pick. Consider ' +
+    'a differential captain if chasing rank.'));
   return wrap;
 }
 
@@ -569,8 +574,11 @@ function plannedCards(bundle, sq, pl, e, setFt) {
 
   // 1) Suggested lineup on the pitch.
   const rec = pl.recommend;
+  const capProj = pl.captain ? A.projectPlayer(bundle, pl.captain, 1) : null;
+  const capRange = capProj && capProj.lo != null
+    ? ` [floor ${capProj.lo.toFixed(1)} · ceiling ${capProj.hi.toFixed(1)}]` : '';
   const foot = h('span', { class: 'muted small' }, [
-    pl.captain ? `Captain ${pl.captain.web} (+${(pl.expById.get(pl.captain.id) || 0).toFixed(1)}). ` : '',
+    pl.captain ? `Captain ${pl.captain.web} (+${(pl.expById.get(pl.captain.id) || 0).toFixed(1)})${capRange}. ` : '',
     rec.k ? `Includes ${rec.k} transfer${rec.k > 1 ? 's' : ''}` : 'No transfers',
     rec.hits ? ` (−${rec.hits * 4} hit)` : '', '.']);
   parts.push(card(`Suggested lineup — GW${nextGw}`,

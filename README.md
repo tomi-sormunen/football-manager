@@ -11,19 +11,21 @@ running as a static web app you can host **for free on GitHub Pages**.
 | View | What you get |
 |---|---|
 | **Dashboard** | Current gameweek, deadline countdown, top captain & value picks, price movers, a sell/watch list. |
-| **My Team** | Import your squad by FPL team ID: your XI/bench on a pitch with captain/vice, bank & value, projected GW total, injury alerts, and suggested transfers (5-GW gain, budget- and club-limit-aware, with −4 hit break-even). |
+| **My Team** | Import your squad by FPL team ID. Defaults to a **suggested next-GW lineup** — the best legal XI (after the required transfers), captain/vice, bench order, and an availability watch for doubtful starters — with a toggle back to last GW's saved team. Plus bank & value, projected total, injury alerts, and suggested transfers (5-GW gain, budget- and club-limit-aware, with −4 hit break-even). |
 | **Planner** | Multi-gameweek outlook (best-XI & bench projections, best captain, double/blank GW detection), chip-timing recommendations (TC / BB / Free Hit / Wildcard), and a transfer plan weighing 0/1/2 moves against −4 hits. |
 | **Players** | Sortable, filterable explorer — price, form, points-per-£m, xGI, **DEFCON per 90** (the new 2025/26 defensive scoring), ownership, and a projection over the next 5 GWs. |
 | **Fixtures** | Colour-coded Fixture Difficulty Ratings (FDR) ticker for the next 6 gameweeks, sorted by easiest run. |
-| **Captains** | Ranked captaincy picks with a transparent breakdown (appearance / attack / clean sheet / DEFCON). |
+| **Captains** | Ranked captaincy picks with a transparent breakdown (appearance / attack / clean sheet / DEFCON) and a **floor–ceiling** risk band (p10–p90). |
 | **Transfers** | Best projected targets by position and budget, plus players to consider selling — with a reminder of the −4 hit maths. |
 | **Differentials** | Low-ownership (<10%) players with a strong projection, for climbing mini-leagues. |
 
-Recommendations are driven by an **opponent-adjusted expected-points model**
-(`xpts-v1`) computed in the GitHub Action, with a transparent client-side
-heuristic as a fallback. The model is deliberately **explainable** (every
-projection comes with a breakdown) and is **backtested** against past gameweeks
-so we can tell it beats naive guessing — see [`docs/MODEL.md`](docs/MODEL.md).
+Recommendations are driven by a **gradient-boosted expected-points model**
+(`xpts-v2`) that stacks on an **opponent-adjusted** base (`xpts-v1`), trained
+offline and scored live by a dependency-free evaluator, with the transparent
+heuristic as a fallback. It also ships **quantile models** for a floor–ceiling
+(p10–p90) risk band. Every projection comes with a breakdown and the model is
+**backtested** against past gameweeks (held-out MAE ~10% better than v1), so we
+can tell it beats naive guessing — see [`docs/MODEL.md`](docs/MODEL.md).
 
 ## How it works (the clever bit)
 
